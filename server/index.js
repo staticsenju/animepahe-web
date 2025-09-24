@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3001;
 const API_BASE = process.env.ANIME_API_BASE || 'https://animepahe.si/api';
 
-const app = express()
+const app = express();
 
 app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*'
@@ -68,7 +68,6 @@ app.get('/api/episodes', async (req, res) => {
     res.status(404).json({ error: 'Could not retrieve episodes', detail: err.message });
   }
 });
-
 
 app.get('/api/stream', async (req, res) => {
   const episodeId = (req.query.episodeId || '').trim();

@@ -5,15 +5,18 @@ import vm from 'vm';
 
 const DEFAULT_HOST = process.env.ANIMEPAHE_HOST || 'https://animepahe.si';
 const UA = process.env.USER_AGENT ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 
+const DEBUG = !!process.env.DEBUG_PLAYLIST_EXTRACTION;
+
+/* ================= Cookie ================= */
 export function generateCookie() {
-  // 16 random URL‑safe alnum characters
   const raw = crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
   return `__ddg2_=${raw}`;
 }
 
-function makeHttp(cookie) {
+/* ================= HTTP Helpers ================= */
+function httpForAnime(cookie) {
   return axios.create({
     baseURL: DEFAULT_HOST,
     headers: {
@@ -28,8 +31,26 @@ function makeHttp(cookie) {
   });
 }
 
+async function fetchHtmlAbsolute(url, cookie, referer) {
+  const headers = {
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': referer || DEFAULT_HOST + '/',
+    'Cookie': cookie
+  };
+  const resp = await axios.get(url, {
+    headers,
+    timeout: 15000,
+    maxRedirects: 5,
+    validateStatus: s => s >= 200 && s < 400
+  });
+  return { html: resp.data, finalUrl: resp.request?.res?.responseUrl || url };
+}
+
+/* ================= Anime Page ================= */
 export async function fetchPlayPage(slug, episodeSession, cookie) {
-  const http = makeHttp(cookie);
+  const http = httpForAnime(cookie);
   const path = `/play/${slug}/${episodeSession}`;
   const { data } = await http.get(path);
   return data;
@@ -56,19 +77,18 @@ export function chooseButton(buttons, { audio, resolution }) {
   let candidates = buttons.slice();
 
   if (audio) {
-    const aud = candidates.filter(b => b.audio === audio);
-    if (aud.length) candidates = aud;
+    const audFiltered = candidates.filter(b => b.audio === audio);
+    if (audFiltered.length) candidates = audFiltered;
   }
   if (resolution) {
-    const res = candidates.filter(b => b.resolution === resolution);
-    if (res.length) candidates = res;
+    const resFiltered = candidates.filter(b => b.resolution === resolution);
+    if (resFiltered.length) candidates = resFiltered;
   }
 
-  // Prefer non-AV1 if available
+  // Prefer non AV1
   const nonAv1 = candidates.filter(b => b.av1 === '0');
   if (nonAv1.length) candidates = nonAv1;
 
-  // Sort by numeric resolution desc
   candidates.sort((a, b) =>
     (parseInt(b.resolution || '0', 10) - parseInt(a.resolution || '0', 10))
   );
@@ -76,131 +96,258 @@ export function chooseButton(buttons, { audio, resolution }) {
   return candidates[0] || null;
 }
 
+/* ================= Playlist Extraction ================= */
+
 /**
- * Attempts to extract a playlist (m3u8) URL from a mirror (kwik-like) page.
- * Strategy:
- *  1. Fetch mirror HTML (with Referer + Cookie).
- *  2. Find all <script> tags containing "eval(".
- *  3. For each, transform: eval( => __AP_LOG__(
- *  4. vm.runInNewContext with sandbox capturing logged code.
- *  5. Search captured outputs for source='...m3u8'
+ * Main exported function: tries to obtain the .m3u8 URL from a kwik-like mirror.
  */
 export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
   if (!mirrorUrl) throw new Error('mirrorUrl is required');
+  const norm = normalizeUrl(mirrorUrl);
 
-  const normalized = normalizeUrl(mirrorUrl);
+  // 1. Fetch mirror page
+  const { html: initialHtml } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
 
-  const headers = {
-    'User-Agent': UA,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Referer': DEFAULT_HOST + '/',
-    'Cookie': cookie
-  };
+  // Handle meta refresh if present
+  const redirectedHtml = await followMetaRefreshIfAny(initialHtml, cookie, norm);
 
-  let html;
-  try {
-    const resp = await axios.get(normalized, {
-      headers,
-      timeout: 15000,
-      validateStatus: s => s >= 200 && s < 400
-    });
-    html = resp.data;
-  } catch (e) {
-    throw new Error(`Mirror fetch failed: ${e.message}`);
-  }
+  const html = redirectedHtml || initialHtml;
 
-  const scripts = extractEvalScripts(html);
-  if (!scripts.length) {
-    throw new Error('No eval() scripts found in mirror page (obfuscation changed?)');
-  }
+  // 2. Collect scripts
+  const scripts = extractAllScripts(html);
 
-  const logsAll = [];
-  let foundSource = '';
+  // 3. Run multi-stage eval capture
+  const chainResult = deobfuscateByEvalChain(scripts);
 
-  for (const original of scripts) {
-    const transformed = transformEvalScript(original);
-    const { logs, error } = runInSandbox(transformed);
-    logsAll.push({ originalSnippet: original.slice(0, 160), logsSnippet: logs.join('\n').slice(0, 300), error: error?.message });
-    const joined = logs.join('\n');
-    const match = joined.match(/source=['"]([^'"]+\\.m3u8)['"]/);
-    if (match) {
-      foundSource = match[1];
-      break;
+  // 4. Aggregate all code fragments to search
+  const codeCorpus = [
+    ...scripts,
+    ...chainResult.capturedEvalStrings,
+    chainResult.combinedEvalOutput
+  ].join('\n\n/* ---- */\n\n');
+
+  // 5. Try heuristics
+  const playlist = extractPlaylistFromCorpus(codeCorpus) ||
+                   extractPlaylistFromCorpus(html) ||
+                   scanBase64ForPlaylist(codeCorpus) ||
+                   scanBase64ForPlaylist(html);
+
+  if (!playlist) {
+    if (DEBUG) {
+      throw new Error(
+        'Playlist not found after heuristics. Debug payload: ' +
+        JSON.stringify({
+          evalStages: chainResult.stagesMeta.slice(0, 6),
+          evalCount: chainResult.capturedEvalStrings.length,
+          sampleCode: codeCorpus.slice(0, 600)
+        }, null, 2)
+      );
     }
-  }
-
-  if (!foundSource) {
-    throw new Error('Playlist source=.m3u8 not discovered in any eval script output');
+    throw new Error('Playlist source (.m3u8) not discovered in mirror scripts');
   }
 
   return {
-    playlist: foundSource,
-    debug: process.env.DEBUG_PLAYLIST_EXTRACTION ? { attempts: logsAll } : undefined
+    playlist,
+    debug: DEBUG ? {
+      totalScripts: scripts.length,
+      evalChainDepth: chainResult.stagesMeta.length,
+      evalCaptured: chainResult.capturedEvalStrings.length,
+      sampleEvalLeaf: chainResult.capturedEvalStrings.slice(-1)[0]?.slice(0, 400),
+    } : undefined
   };
 }
 
-/* ---------- Helpers ---------- */
+/* ================= Deobfuscation Core ================= */
 
-function normalizeUrl(u) {
-  if (u.startsWith('//')) return 'https:' + u;
-  if (!/^https?:/i.test(u)) return u.replace(/^\/+/, 'https://');
-  return u;
-}
+/**
+ * Recursively intercept nested eval code.
+ */
+function deobfuscateByEvalChain(scriptBodies) {
+  const capturedEvalStrings = [];
+  const stagesMeta = [];
 
-function extractEvalScripts(html) {
-  // Grab script tag bodies that contain eval(
-  const matches = [];
-  const scriptRegex = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = scriptRegex.exec(html)) !== null) {
-    const body = m[1] || '';
-    if (body.includes('eval(')) {
-      matches.push(body.trim());
+  // We process any script that contains eval( or suspicious patterns
+  const queue = scriptBodies
+    .filter(s => /eval\(/.test(s) || /source\s*=/.test(s))
+    .slice();
+
+  const seen = new Set();
+
+  while (queue.length) {
+    const original = queue.shift();
+    if (!original || seen.has(original)) continue;
+    seen.add(original);
+
+    const stageLogs = [];
+    const nestedCaptured = [];
+    const sandbox = makeSandbox(nestedCaptured, stageLogs);
+
+    // Replace direct eval( with eval( to intercept; we override eval in sandbox.
+    const prepared = original; // we rely on sandbox.eval override now.
+
+    let error = null;
+    try {
+      vm.runInNewContext(prepared, sandbox, { timeout: 3000 });
+    } catch (e) {
+      error = e;
+    }
+
+    stagesMeta.push({
+      inputSnippet: original.slice(0, 140),
+      logsSnippet: stageLogs.slice(0, 6).join('\n').slice(0, 300),
+      nestedCount: nestedCaptured.length,
+      error: error ? (error.message || String(error)) : null
+    });
+
+    // Add nested captured strings
+    for (const nested of nestedCaptured) {
+      capturedEvalStrings.push(nested);
+      if (!seen.has(nested) && /eval\(/.test(nested)) {
+        queue.push(nested);
+      }
     }
   }
-  // Prefer longer scripts first (often the main obfuscation)
-  matches.sort((a, b) => b.length - a.length);
-  return matches;
+
+  return {
+    capturedEvalStrings,
+    stagesMeta,
+    combinedEvalOutput: capturedEvalStrings.join('\n')
+  };
 }
 
-function transformEvalScript(code) {
-  // DO NOT aggressively replace document or querySelector; only intercept eval.
-  // Replace eval( occurrences with our logger function.
-  return code.replace(/eval\(/g, '__AP_LOG__(');
-}
-
-function runInSandbox(code) {
-  const logs = [];
+/**
+ * Sandbox with eval overridden.
+ */
+function makeSandbox(nestedCaptured, stageLogs) {
   const sandbox = {
-    __AP_LOG__: (arg) => {
-      try {
-        // Many obfuscated wrappers call eval on a string. We just log it.
-        if (typeof arg === 'string') logs.push(arg);
-        else logs.push(String(arg));
-      } catch {
-        logs.push('[unstringifiable]');
+    console: {
+      log: (...args) => {
+        stageLogs.push(args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
       }
     },
-    console: {
-      log: (...a) => logs.push(a.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '))
+    // Intercept eval
+    eval: (arg) => {
+      try {
+        if (typeof arg === 'string') {
+          nestedCaptured.push(arg);
+          // Attempt execution to go deeper:
+          try {
+            return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
+          } catch (inner) {
+            stageLogs.push('[eval-exec-error] ' + inner.message);
+          }
+          return arg;
+        }
+        return arg;
+      } catch (e) {
+        stageLogs.push('[eval-error] ' + e.message);
+        return undefined;
+      }
     },
     setTimeout: () => {},
     setInterval: () => {},
     clearTimeout: () => {},
     clearInterval: () => {},
-    // Provide minimal global objects
     window: {},
-    document: {},
+    document: {
+      querySelector: () => ({ click: () => {}, remove: () => {} }),
+      createElement: () => ({ style: {}, appendChild: () => {} }),
+      body: { appendChild: () => {} }
+    },
     navigator: { userAgent: UA },
+    atob: (b64) => Buffer.from(b64, 'base64').toString('utf8'),
+    btoa: (str) => Buffer.from(str, 'utf8').toString('base64'),
+    crypto: {},
+    location: { href: 'https://kwik.si/' },
     globalThis: {}
   };
   sandbox.globalThis = sandbox;
+  return sandbox;
+}
 
-  let error = null;
-  try {
-    vm.runInNewContext(code, sandbox, { timeout: 3000 });
-  } catch (e) {
-    error = e;
+/* ================= Extraction Heuristics ================= */
+
+const PLAYLIST_REGEXES = [
+  /source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
+  /['"]([^'"]+\.m3u8[^'"]*)['"]\s*[,;)]/i,
+  /\bfile\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
+  /\bsrc\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
+  /\burl\s*[:=]\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
+  /PLAYLIST\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i
+];
+
+function extractPlaylistFromCorpus(text) {
+  if (!text) return null;
+  for (const rx of PLAYLIST_REGEXES) {
+    const m = text.match(rx);
+    if (m && m[1]) {
+      return sanitizeUrl(m[1]);
+    }
   }
-  return { logs, error };
+  return null;
+}
+
+function scanBase64ForPlaylist(text) {
+  if (!text) return null;
+  // Find base64-ish blobs 60+ chars likely
+  const candidates = text.match(/[A-Za-z0-9+/=]{40,}/g) || [];
+  for (const c of candidates.slice(0, 200)) {
+    try {
+      const decoded = Buffer.from(c, 'base64').toString('utf8');
+      if (/\.m3u8/i.test(decoded)) {
+        const pl = extractPlaylistFromCorpus(decoded) ||
+                   decoded.match(/https?:\/\/[^\s'"]+\.m3u8[^\s'"]*/i)?.[0];
+        if (pl) return sanitizeUrl(pl);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function sanitizeUrl(u) {
+  if (!u) return u;
+  // Remove trailing characters like &quot; or ')
+  return u.replace(/&quot;?$/,'').replace(/['")\\]+$/,'').trim();
+}
+
+/* ================= Script Collection ================= */
+function extractAllScripts(html) {
+  const out = [];
+  const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const body = (m[1] || '').trim();
+    if (body) out.push(body);
+  }
+  return out;
+}
+
+/* ================= Meta Refresh ================= */
+async function followMetaRefreshIfAny(html, cookie, refererUrl) {
+  const meta = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]*>/i);
+  if (!meta) return null;
+  const urlMatch = meta[0].match(/url=([^"'>\s]+)/i);
+  if (!urlMatch) return null;
+  const target = urlMatch[1];
+  // If relative
+  let absolute = target;
+  if (!/^https?:/i.test(absolute)) {
+    const base = refererUrl.split('/').slice(0, 3).join('/');
+    absolute = base + (target.startsWith('/') ? target : '/' + target);
+  }
+  const { html: followHtml } = await fetchHtmlAbsolute(absolute, cookie, refererUrl);
+  return followHtml;
+}
+
+/* ================= URL Helpers ================= */
+function normalizeUrl(u) {
+  if (u.startsWith('//')) return 'https:' + u;
+  if (!/^https?:/i.test(u)) {
+    // If it's something like /e/abc
+    if (u.startsWith('/')) return 'https://kwik.si' + u;
+    return 'https://kwik.si/' + u.replace(/^\/+/, '');
+  }
+  return u;
 }

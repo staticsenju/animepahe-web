@@ -1,35 +1,419 @@
-let searchResults=[];let selectedAnime=null;let episodes=[];let currentEpisode=null;let lastPlaylistUrl='';let lastCookie='';let appliedResolution='';let appliedAudio='';let subtitleTracks=[];let activeSubtitleUri='';let autoplay=false;let hlsInstance=null;let mirrorButtons=[];
-const $=id=>document.getElementById(id);
-const els={status:$('status'),searchInput:$('searchInput'),searchBtn:$('searchBtn'),resultsGrid:$('resultsGrid'),emptyHint:$('emptyHint'),resolutionSelect:$('resolutionSelect'),audioSelect:$('audioSelect'),subtitleSelect:$('subtitleSelect'),applyBtn:$('applyBtn'),refreshMirrorsBtn:$('refreshMirrorsBtn'),reloadPlaylistBtn:$('reloadPlaylistBtn'),playerStatus:$('playerStatus'),seriesTitle:$('seriesTitle'),currentEpLabel:$('currentEpLabel'),video:$('video'),episodesGrid:$('episodesGrid'),episodesCount:$('episodesCount'),backBtn:$('backBtn'),toggleAutoplayBtn:$('toggleAutoplayBtn'),mirrorPanel:$('mirrorPanel'),mirrorList:$('mirrorList'),closeMirrorPanel:$('closeMirrorPanel')};
-function setStatus(msg,kind=''){els.status.textContent=msg;els.status.style.color=kind==='error'?'var(--error)':kind==='warn'?'var(--warn)':'var(--fg-dim)';}
-function setPlayerStatus(msg,kind=''){els.playerStatus.textContent=msg;els.playerStatus.style.color=kind==='error'?'var(--error)':kind==='warn'?'var(--warn)':'var(--fg-dim)';}
-function spinner(){return'…';}
-function pickPoster(item){return item.poster||item.image||item.cover||item.snapshot||'';}
-async function doSearch(){const q=els.searchInput.value.trim();if(!q){setStatus('Enter a search term');return;}setStatus('Searching '+spinner());try{const res=await fetch('/api/search?q='+encodeURIComponent(q));if(!res.ok)throw new Error(res.status+' search error');const data=await res.json();searchResults=data?.data||data?.results||[];renderResults();if(!searchResults.length)setStatus('No results');else setStatus(searchResults.length+' result(s)');}catch(e){setStatus('Search error: '+e.message,'error');}}
-function renderResults(){els.resultsGrid.innerHTML='';if(!searchResults.length){els.emptyHint.style.display='block';return;}els.emptyHint.style.display='none';searchResults.forEach(item=>{const card=document.createElement('div');card.className='card';const inner=document.createElement('div');inner.className='card-inner';const imgUrl=pickPoster(item);if(imgUrl){const img=document.createElement('img');img.loading='lazy';img.src=imgUrl;inner.appendChild(img);}card.appendChild(inner);const info=document.createElement('div');info.className='info';const titleDiv=document.createElement('div');titleDiv.className='title';titleDiv.textContent=item.title||'Untitled';const meta=document.createElement('div');meta.className='meta';const pieces=[];if(item.type)pieces.push(item.type);if(item.year)pieces.push(item.year);if(item.episode)pieces.push('Ep '+item.episode);meta.textContent=pieces.join(' • ');info.appendChild(titleDiv);info.appendChild(meta);card.appendChild(info);card.addEventListener('click',()=>selectAnime(item));els.resultsGrid.appendChild(card);});}
-async function selectAnime(item){selectedAnime=item;episodes=[];currentEpisode=null;document.body.classList.add('mode-player');els.seriesTitle.textContent=item.title||'Untitled';els.currentEpLabel.textContent='';clearPlayerState();setPlayerStatus('Loading episodes '+spinner());try{let token=item.session||item.id||item.slug;if(!token)throw new Error('Missing session/id');const r=await fetch('/api/episodes?id='+encodeURIComponent(token));if(!r.ok)throw new Error(r.status+' episodes error');const data=await r.json();episodes=data?.episodes||data?.data||[];renderEpisodesPanel();setPlayerStatus('Episodes loaded');if(episodes.length)loadEpisode(episodes[0]);}catch(e){setPlayerStatus('Episodes error: '+e.message,'error');}}
-function renderEpisodesPanel(){els.episodesGrid.innerHTML='';episodes.forEach(ep=>{const tile=document.createElement('div');tile.className='ep-tile';tile.innerHTML=`<div class="ep-num">#${ep.episode??'?'}</div><div class="ep-meta">${(ep.audio||'')+' '+(ep.duration||'').replace(/^00:/,'')}</div>`;tile.addEventListener('click',()=>loadEpisode(ep));els.episodesGrid.appendChild(tile);});els.episodesCount.textContent=episodes.length?episodes.length+' eps':'';highlightCurrentEpisode();}
-function highlightCurrentEpisode(){const tiles=els.episodesGrid.querySelectorAll('.ep-tile');tiles.forEach(t=>t.classList.remove('active'));if(!currentEpisode)return;const idx=episodes.findIndex(e=>e.session===currentEpisode.session);if(idx>=0&&tiles[idx])tiles[idx].classList.add('active');}
-function clearPlayerState(){els.resolutionSelect.innerHTML='<option value="">Resolution (Auto)</option>';els.audioSelect.innerHTML='<option value="">Audio (Auto)</option>';els.subtitleSelect.innerHTML='<option value="">Subtitles (None)</option>';subtitleTracks=[];activeSubtitleUri='';appliedResolution='';appliedAudio='';lastPlaylistUrl='';lastCookie='';mirrorButtons=[];els.applyBtn.disabled=true;els.refreshMirrorsBtn.disabled=true;els.reloadPlaylistBtn.disabled=true;if(hlsInstance){hlsInstance.destroy();hlsInstance=null;}els.video.removeAttribute('src');els.video.load();}
-async function loadEpisode(ep){currentEpisode=ep;highlightCurrentEpisode();els.currentEpLabel.textContent='EP '+(ep.episode??'?');clearPlayerState();setPlayerStatus('Fetching mirrors '+spinner());try{const slug=(selectedAnime?.slug||selectedAnime?.session||selectedAnime?.id||'').trim();if(!slug)throw new Error('Missing slug');const url=`/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(ep.session)}?listOnly=true`;const r=await fetch(url);const data=await r.json();if(!r.ok)throw new Error(data.error||'Mirror fetch failed');mirrorButtons=data.buttons||[];populateSelectors(mirrorButtons);els.applyBtn.disabled=false;els.refreshMirrorsBtn.disabled=false;setPlayerStatus('Mirrors loaded');await resolveAndPlay();}catch(e){setPlayerStatus('Mirror error: '+e.message,'error');}}
-function populateSelectors(buttons){const resSet=[...new Set(buttons.map(b=>b.resolution).filter(Boolean))].sort((a,b)=>parseInt(b)-parseInt(a));const audioSet=[...new Set(buttons.map(b=>b.audio).filter(Boolean))];resSet.forEach(r=>{const opt=document.createElement('option');opt.value=r;opt.textContent=r+'p';els.resolutionSelect.appendChild(opt);});audioSet.forEach(a=>{const opt=document.createElement('option');opt.value=a;opt.textContent=a;els.audioSelect.appendChild(opt);});}
-async function resolveAndPlay(){if(!selectedAnime||!currentEpisode)return;setPlayerStatus('Resolving playlist '+spinner());els.reloadPlaylistBtn.disabled=true;try{const slug=(selectedAnime.slug||selectedAnime.session||selectedAnime.id||'').trim();const qs=new URLSearchParams();if(els.resolutionSelect.value)qs.set('resolution',els.resolutionSelect.value);if(els.audioSelect.value)qs.set('audio',els.audioSelect.value);const playUrl=`/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(currentEpisode.session)}?${qs.toString()}`;const r=await fetch(playUrl);const data=await r.json();if(!r.ok||!data.playlist)throw new Error(data.error||'No playlist');lastPlaylistUrl=data.playlist;lastCookie=data.cookie||'';appliedResolution=els.resolutionSelect.value;appliedAudio=els.audioSelect.value;els.reloadPlaylistBtn.disabled=false;const proxied=buildProxiedPlaylist(lastPlaylistUrl,lastCookie);await playHls(proxied);setPlayerStatus(`Playing EP ${currentEpisode.episode} ${(appliedResolution||'AUTO')} ${(appliedAudio||'')}`.trim());await extractSubtitlesFromMaster(proxied);}catch(e){setPlayerStatus('Playlist error: '+e.message,'error');}}
-function buildProxiedPlaylist(url,cookieVal){return'/api/hls?u='+encodeURIComponent(url)+(cookieVal?'&c='+encodeURIComponent(cookieVal):'');}
-async function playHls(url){if(hlsInstance){hlsInstance.destroy();hlsInstance=null;}[...els.video.querySelectorAll('track')].forEach(t=>t.remove());if(window.Hls&&Hls.isSupported()){hlsInstance=new Hls({enableWorker:true,lowLatencyMode:true});hlsInstance.loadSource(url);hlsInstance.attachMedia(els.video);hlsInstance.on(Hls.Events.ERROR,(evt,data)=>{if(data?.fatal)setPlayerStatus('Fatal HLS error','error');});}else if(els.video.canPlayType('application/vnd.apple.mpegurl')){els.video.src=url;}else{setPlayerStatus('HLS unsupported','error');}}
-async function extractSubtitlesFromMaster(masterUrl){subtitleTracks=[];activeSubtitleUri='';els.subtitleSelect.innerHTML='<option value="">Subtitles (None)</option>';try{const r=await fetch(masterUrl);if(!r.ok)return;const text=await r.text();parseSubs(text,masterUrl);subtitleTracks.forEach((t,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent=t.label||t.lang||('Track '+(i+1));els.subtitleSelect.appendChild(opt);});}catch{}}
-function parseSubs(text,baseUrl){const base=baseUrl.split('/').slice(0,-1).join('/');const lines=text.split(/\r?\n/);for(const l of lines){if(l.startsWith('#EXT-X-MEDIA')&&/TYPE=SUBTITLES/.test(l)){const u=l.match(/URI="([^"]+)"/);if(u){let uri=u[1];if(!/^https?:/i.test(uri))uri=base+'/'+uri.replace(/^\.\//,'');uri=buildProxiedPlaylist(uri,lastCookie);const lang=(l.match(/LANGUAGE="([^"]+)"/)||[])[1]||'';const name=(l.match(/NAME="([^"]+)"/)||[])[1]||lang||'Subtitle';subtitleTracks.push({uri,lang,label:name});}}}}
-async function applySubtitle(index){[...els.video.querySelectorAll('track')].forEach(t=>t.remove());if(index===''||index==null)return;const track=subtitleTracks[index];if(!track)return;try{const r=await fetch(track.uri);if(!r.ok)return;const text=await r.text();let finalVtt='';finalVtt=text.startsWith('WEBVTT')?text:'WEBVTT\\n\\n'+text;const blob=new Blob([finalVtt],{type:'text/vtt'});const url=URL.createObjectURL(blob);const tr=document.createElement('track');tr.kind='subtitles';tr.label=track.label;tr.srclang=track.lang||'und';tr.default=true;tr.src=url;els.video.appendChild(tr);}catch{}}
-function toggleMirrorPanel(open){if(open===true)els.mirrorPanel.classList.add('active');else if(open===false)els.mirrorPanel.classList.remove('active');else els.mirrorPanel.classList.toggle('active');if(els.mirrorPanel.classList.contains('active'))renderMirrors();}
-function renderMirrors(){els.mirrorList.innerHTML='';mirrorButtons.forEach(b=>{const div=document.createElement('div');div.className='mirror';div.innerHTML=`<div class="mirror-header"><span>${b.resolution||'?'}p</span><span class="badge">${b.audio||'?'}</span></div><div style="font-size:.55rem;opacity:.6;word-break:break-all;">${(b.src||'').replace(/^https?:\\/\\//,'')}</div><button data-src="${b.src}">Play</button>`;div.querySelector('button').addEventListener('click',async()=>{els.resolutionSelect.value=b.resolution||'';els.audioSelect.value=b.audio||'';toggleMirrorPanel(false);await resolveAndPlay();});els.mirrorList.appendChild(div);});}
-els.searchBtn.addEventListener('click',doSearch);
-els.searchInput.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
-els.applyBtn.addEventListener('click',resolveAndPlay);
-els.reloadPlaylistBtn.addEventListener('click',()=>{if(lastPlaylistUrl)playHls(buildProxiedPlaylist(lastPlaylistUrl,lastCookie));});
-els.refreshMirrorsBtn.addEventListener('click',()=>toggleMirrorPanel());
-els.closeMirrorPanel.addEventListener('click',()=>toggleMirrorPanel(false));
-els.subtitleSelect.addEventListener('change',e=>{if(e.target.value==='')applySubtitle('');else applySubtitle(parseInt(e.target.value,10));});
-els.video.addEventListener('ended',()=>{if(!autoplay||!currentEpisode)return;const idx=episodes.findIndex(e=>e.session===currentEpisode.session);if(idx>=0&&idx<episodes.length-1)loadEpisode(episodes[idx+1]);});
-els.backBtn.addEventListener('click',()=>{document.body.classList.remove('mode-player');selectedAnime=null;currentEpisode=null;clearPlayerState();});
-els.toggleAutoplayBtn.addEventListener('click',()=>{autoplay=!autoplay;els.toggleAutoplayBtn.textContent='Autoplay: '+(autoplay?'On':'Off');});
-setStatus('Ready.');
-setTimeout(()=>{els.searchInput.focus();},40);
+"use strict";
+let searchResults = [];
+let selectedAnime = null;
+let episodes = [];
+let currentEpisode = null;
+let lastPlaylistUrl = '';
+let lastCookie = '';
+let appliedResolution = '';
+let appliedAudio = '';
+let subtitleTracks = [];
+let activeSubtitleUri = '';
+let autoplay = false;
+let hlsInstance = null;
+let mirrorButtons = [];
+const $ = id => document.getElementById(id);
+const els = {
+    status: $('status'),
+    searchInput: $('searchInput'),
+    searchBtn: $('searchBtn'),
+    resultsGrid: $('resultsGrid'),
+    emptyHint: $('emptyHint'),
+    resolutionSelect: $('resolutionSelect'),
+    audioSelect: $('audioSelect'),
+    subtitleSelect: $('subtitleSelect'),
+    applyBtn: $('applyBtn'),
+    refreshMirrorsBtn: $('refreshMirrorsBtn'),
+    reloadPlaylistBtn: $('reloadPlaylistBtn'),
+    playerStatus: $('playerStatus'),
+    seriesTitle: $('seriesTitle'),
+    currentEpLabel: $('currentEpLabel'),
+    video: $('video'),
+    episodesGrid: $('episodesGrid'),
+    episodesCount: $('episodesCount'),
+    backBtn: $('backBtn'),
+    toggleAutoplayBtn: $('toggleAutoplayBtn'),
+    mirrorPanel: $('mirrorPanel'),
+    mirrorList: $('mirrorList'),
+    closeMirrorPanel: $('closeMirrorPanel')
+};
+
+function setStatus(msg, kind = '') {
+    els.status.textContent = msg;
+    els.status.style.color =
+        kind === 'error' ? 'var(--error)' :
+        kind === 'warn' ? 'var(--warn)' :
+        'var(--fg-dim)';
+}
+
+function setPlayerStatus(msg, kind = '') {
+    els.playerStatus.textContent = msg;
+    els.playerStatus.style.color =
+        kind === 'error' ? 'var(--error)' :
+        kind === 'warn' ? 'var(--warn)' :
+        'var(--fg-dim)';
+}
+
+function spinner() {
+    return '…';
+}
+
+function pickPoster(item) {
+    return item.poster || item.image || item.cover || item.snapshot || '';
+}
+async function doSearch() {
+    const q = els.searchInput.value.trim();
+    if (!q) {
+        setStatus('Enter a search term');
+        return;
+    }
+    setStatus('Searching ' + spinner());
+    try {
+        const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+        if (!res.ok) throw new Error(res.status + ' search error');
+        const data = await res.json();
+        searchResults = data?.data || data?.results || [];
+        renderResults();
+        setStatus(searchResults.length ? (searchResults.length + ' result(s)') : 'No results');
+    } catch (e) {
+        setStatus('Search error: ' + e.message, 'error');
+    }
+}
+
+function renderResults() {
+    els.resultsGrid.innerHTML = '';
+    if (!searchResults.length) {
+        els.emptyHint.style.display = 'block';
+        return;
+    }
+    els.emptyHint.style.display = 'none';
+    for (const item of searchResults) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const inner = document.createElement('div');
+        inner.className = 'card-inner';
+        const imgUrl = pickPoster(item);
+        if (imgUrl) {
+            const img = document.createElement('img');
+            img.loading = 'lazy';
+            img.src = imgUrl;
+            inner.appendChild(img);
+        }
+        card.appendChild(inner);
+        const info = document.createElement('div');
+        info.className = 'info';
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'title';
+        titleDiv.textContent = item.title || 'Untitled';
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const pieces = [];
+        if (item.type) pieces.push(item.type);
+        if (item.year) pieces.push(item.year);
+        if (item.episode) pieces.push('Ep ' + item.episode);
+        meta.textContent = pieces.join(' • ');
+        info.appendChild(titleDiv);
+        info.appendChild(meta);
+        card.appendChild(info);
+        card.addEventListener('click', () => selectAnime(item));
+        els.resultsGrid.appendChild(card);
+    }
+}
+async function selectAnime(item) {
+    selectedAnime = item;
+    episodes = [];
+    currentEpisode = null;
+    document.body.classList.add('mode-player');
+    els.seriesTitle.textContent = item.title || 'Untitled';
+    els.currentEpLabel.textContent = '';
+    clearPlayerState();
+    setPlayerStatus('Loading episodes ' + spinner());
+    try {
+        const token = item.session || item.id || item.slug;
+        if (!token) throw new Error('Missing session/id');
+        const r = await fetch('/api/episodes?id=' + encodeURIComponent(token));
+        if (!r.ok) throw new Error(r.status + ' episodes error');
+        const data = await r.json();
+        episodes = data?.episodes || data?.data || [];
+        renderEpisodesPanel();
+        setPlayerStatus('Episodes loaded');
+        if (episodes.length) {
+            await loadEpisode(episodes[0]);
+        }
+    } catch (e) {
+        setPlayerStatus('Episodes error: ' + e.message, 'error');
+    }
+}
+
+function renderEpisodesPanel() {
+    els.episodesGrid.innerHTML = '';
+    for (const ep of episodes) {
+        const tile = document.createElement('div');
+        tile.className = 'ep-tile';
+        tile.innerHTML = `
+      <div class="ep-num">#${ep.episode ?? '?'}</div>
+      <div class="ep-meta">${(ep.audio || '')} ${(ep.duration || '').replace(/^00:/,'')}</div>
+    `;
+        tile.addEventListener('click', () => loadEpisode(ep));
+        els.episodesGrid.appendChild(tile);
+    }
+    els.episodesCount.textContent = episodes.length ? `${episodes.length} eps` : '';
+    highlightCurrentEpisode();
+}
+
+function highlightCurrentEpisode() {
+    const tiles = els.episodesGrid.querySelectorAll('.ep-tile');
+    tiles.forEach(t => t.classList.remove('active'));
+    if (!currentEpisode) return;
+    const idx = episodes.findIndex(e => e.session === currentEpisode.session);
+    if (idx >= 0 && tiles[idx]) tiles[idx].classList.add('active');
+}
+
+function clearPlayerState() {
+    els.resolutionSelect.innerHTML = '<option value="">Resolution (Auto)</option>';
+    els.audioSelect.innerHTML = '<option value="">Audio (Auto)</option>';
+    els.subtitleSelect.innerHTML = '<option value="">Subtitles (None)</option>';
+    subtitleTracks = [];
+    activeSubtitleUri = '';
+    appliedResolution = '';
+    appliedAudio = '';
+    lastPlaylistUrl = '';
+    lastCookie = '';
+    mirrorButtons = [];
+    els.applyBtn.disabled = true;
+    els.refreshMirrorsBtn.disabled = true;
+    els.reloadPlaylistBtn.disabled = true;
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
+    els.video.removeAttribute('src');
+    els.video.load();
+}
+async function loadEpisode(ep) {
+    currentEpisode = ep;
+    highlightCurrentEpisode();
+    els.currentEpLabel.textContent = 'EP ' + (ep.episode ?? '?');
+    clearPlayerState();
+    setPlayerStatus('Fetching mirrors ' + spinner());
+    try {
+        const slug = (selectedAnime?.slug || selectedAnime?.session || selectedAnime?.id || '').trim();
+        if (!slug) throw new Error('Missing slug');
+        const url = `/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(ep.session)}?listOnly=true`;
+        const r = await fetch(url);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Mirror fetch failed');
+        mirrorButtons = data.buttons || [];
+        populateSelectors(mirrorButtons);
+        els.applyBtn.disabled = false;
+        els.refreshMirrorsBtn.disabled = false;
+        setPlayerStatus('Mirrors loaded');
+        await resolveAndPlay();
+    } catch (e) {
+        setPlayerStatus('Mirror error: ' + e.message, 'error');
+    }
+}
+
+function populateSelectors(buttons) {
+    const resSet = [...new Set(buttons.map(b => b.resolution).filter(Boolean))]
+        .sort((a, b) => parseInt(b) - parseInt(a));
+    const audioSet = [...new Set(buttons.map(b => b.audio).filter(Boolean))];
+    for (const r of resSet) {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r + 'p';
+        els.resolutionSelect.appendChild(opt);
+    }
+    for (const a of audioSet) {
+        const opt = document.createElement('option');
+        opt.value = a;
+        opt.textContent = a;
+        els.audioSelect.appendChild(opt);
+    }
+}
+async function resolveAndPlay() {
+    if (!selectedAnime || !currentEpisode) return;
+    setPlayerStatus('Resolving playlist ' + spinner());
+    els.reloadPlaylistBtn.disabled = true;
+    try {
+        const slug = (selectedAnime.slug || selectedAnime.session || selectedAnime.id || '').trim();
+        const qs = new URLSearchParams();
+        if (els.resolutionSelect.value) qs.set('resolution', els.resolutionSelect.value);
+        if (els.audioSelect.value) qs.set('audio', els.audioSelect.value);
+        const playUrl =
+            `/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(currentEpisode.session)}?${qs.toString()}`;
+        const r = await fetch(playUrl);
+        const data = await r.json();
+        if (!r.ok || !data.playlist) throw new Error(data.error || 'No playlist');
+        lastPlaylistUrl = data.playlist;
+        lastCookie = data.cookie || '';
+        appliedResolution = els.resolutionSelect.value;
+        appliedAudio = els.audioSelect.value;
+        els.reloadPlaylistBtn.disabled = false;
+        const proxied = buildProxiedPlaylist(lastPlaylistUrl, lastCookie);
+        await playHls(proxied);
+        setPlayerStatus(
+            `Playing EP ${currentEpisode.episode} ${(appliedResolution || 'AUTO')} ${(appliedAudio || '')}`.trim()
+        );
+        await extractSubtitlesFromMaster(proxied);
+    } catch (e) {
+        setPlayerStatus('Playlist error: ' + e.message, 'error');
+    }
+}
+
+function buildProxiedPlaylist(url, cookieVal) {
+    return '/api/hls?u=' + encodeURIComponent(url) +
+        (cookieVal ? '&c=' + encodeURIComponent(cookieVal) : '');
+}
+async function playHls(url) {
+    if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+    }
+    [...els.video.querySelectorAll('track')].forEach(t => t.remove());
+    if (window.Hls && Hls.isSupported()) {
+        hlsInstance = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true
+        });
+        hlsInstance.loadSource(url);
+        hlsInstance.attachMedia(els.video);
+        hlsInstance.on(Hls.Events.ERROR, (evt, data) => {
+            if (data?.fatal) setPlayerStatus('Fatal HLS error', 'error');
+        });
+    } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
+        els.video.src = url;
+    } else {
+        setPlayerStatus('HLS unsupported', 'error');
+    }
+}
+async function extractSubtitlesFromMaster(masterUrl) {
+    subtitleTracks = [];
+    activeSubtitleUri = '';
+    els.subtitleSelect.innerHTML = '<option value="">Subtitles (None)</option>';
+    try {
+        const r = await fetch(masterUrl);
+        if (!r.ok) return;
+        const text = await r.text();
+        parseSubs(text, masterUrl);
+        subtitleTracks.forEach((t, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = t.label || t.lang || ('Track ' + (i + 1));
+            els.subtitleSelect.appendChild(opt);
+        });
+    } catch {}
+}
+
+function parseSubs(text, baseUrl) {
+    const base = baseUrl.split('/').slice(0, -1).join('/');
+    const lines = text.split(/\r?\n/);
+    for (const l of lines) {
+        if (l.startsWith('#EXT-X-MEDIA') && /TYPE=SUBTITLES/.test(l)) {
+            const u = l.match(/URI="([^"]+)"/);
+            if (u) {
+                let uri = u[1];
+                if (!/^https?:/i.test(uri)) {
+                    uri = base + '/' + uri.replace(/^\.\
+                    }
+                    uri = buildProxiedPlaylist(uri, lastCookie);
+                    const lang = (l.match(/LANGUAGE="([^"]+)"/) || [])[1] || '';
+                    const name = (l.match(/NAME="([^"]+)"/) || [])[1] || lang || 'Subtitle';
+                    subtitleTracks.push({
+                        uri,
+                        lang,
+                        label: name
+                    });
+                }
+            }
+        }
+    }
+    async function applySubtitle(index) {
+        [...els.video.querySelectorAll('track')].forEach(t => t.remove());
+        if (index === '' || index == null) return;
+        const track = subtitleTracks[index];
+        if (!track) return;
+        try {
+            const r = await fetch(track.uri);
+            if (!r.ok) return;
+            const text = await r.text();
+            const finalVtt = text.startsWith('WEBVTT') ? text : 'WEBVTT\n\n' + text;
+            const blob = new Blob([finalVtt], {
+                type: 'text/vtt'
+            });
+            const url = URL.createObjectURL(blob);
+            const tr = document.createElement('track');
+            tr.kind = 'subtitles';
+            tr.label = track.label;
+            tr.srclang = track.lang || 'und';
+            tr.default = true;
+            tr.src = url;
+            els.video.appendChild(tr);
+        } catch {}
+    }
+
+    function toggleMirrorPanel(open) {
+        if (open === true) els.mirrorPanel.classList.add('active');
+        else if (open === false) els.mirrorPanel.classList.remove('active');
+        else els.mirrorPanel.classList.toggle('active');
+        if (els.mirrorPanel.classList.contains('active')) renderMirrors();
+    }
+
+    function renderMirrors() {
+        els.mirrorList.innerHTML = '';
+        for (const b of mirrorButtons) {
+            const div = document.createElement('div');
+            div.className = 'mirror';
+            const shortSrc = (b.src || '').replace(/^https?:\/\
+                div.innerHTML = `
+      <div class="mirror-header">
+        <span>${b.resolution || '?'}p</span>
+        <span class="badge">${b.audio || '?'}</span>
+      </div>
+      <div style="font-size:.55rem;opacity:.6;word-break:break-all;">${shortSrc}</div>
+      <button data-src="${b.src}">Play</button>
+    `; div.querySelector('button').addEventListener('click', async () => {
+                    els.resolutionSelect.value = b.resolution || '';
+                    els.audioSelect.value = b.audio || '';
+                    toggleMirrorPanel(false);
+                    await resolveAndPlay();
+                }); els.mirrorList.appendChild(div);
+            }
+        }
+        els.searchBtn.addEventListener('click', doSearch);
+        els.searchInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') doSearch();
+        });
+        els.applyBtn.addEventListener('click', resolveAndPlay);
+        els.reloadPlaylistBtn.addEventListener('click', () => {
+            if (lastPlaylistUrl) {
+                playHls(buildProxiedPlaylist(lastPlaylistUrl, lastCookie));
+            }
+        });
+        els.refreshMirrorsBtn.addEventListener('click', () => toggleMirrorPanel());
+        els.closeMirrorPanel.addEventListener('click', () => toggleMirrorPanel(false));
+        els.subtitleSelect.addEventListener('change', e => {
+            if (e.target.value === '') applySubtitle('');
+            else applySubtitle(parseInt(e.target.value, 10));
+        });
+        els.video.addEventListener('ended', () => {
+            if (!autoplay || !currentEpisode) return;
+            const idx = episodes.findIndex(e => e.session === currentEpisode.session);
+            if (idx >= 0 && idx < episodes.length - 1) {
+                loadEpisode(episodes[idx + 1]);
+            }
+        });
+        els.backBtn.addEventListener('click', () => {
+            document.body.classList.remove('mode-player');
+            selectedAnime = null;
+            currentEpisode = null;
+            clearPlayerState();
+        });
+        els.toggleAutoplayBtn.addEventListener('click', () => {
+            autoplay = !autoplay;
+            els.toggleAutoplayBtn.textContent = 'Autoplay: ' + (autoplay ? 'On' : 'Off');
+        });
+        setStatus('Ready.');
+        setTimeout(() => {
+            els.searchInput.focus();
+        }, 40);

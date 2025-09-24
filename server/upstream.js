@@ -1,4 +1,3 @@
-// Shared upstream axios instance with randomized cookie & browser-like headers
 import axios from 'axios';
 
 const API_ORIGIN = 'https://animepahe.si';
@@ -11,7 +10,6 @@ function randomCookieValue(len = 16) {
   return out;
 }
 
-// Random cookie each process start (mimics ap.sh style)
 const cookie = `__ddg2_=${randomCookieValue()}`;
 
 export const upstream = axios.create({
@@ -25,7 +23,6 @@ export const upstream = axios.create({
   }
 });
 
-// Generic GET helper for params object
 export async function apiGet(params) {
   const qs = new URLSearchParams(params).toString();
   const { data } = await upstream.get('?' + qs);

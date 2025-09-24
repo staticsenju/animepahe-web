@@ -1,0 +1,41 @@
+{
+  "name": "animepahe-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal self-hosted web UI + backend proxy for Animepahe search, episodes, mirrors, and HLS streaming.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development node server/index.js",
+    "start:port": "PORT=3001 node server/index.js",
+    "lint": "echo \"(Add eslint later)\"",
+    "clean": "rm -rf node_modules package-lock.json",
+    "postinstall": "echo \"Install complete\""
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "keywords": [
+    "anime",
+    "hls",
+    "proxy",
+    "express",
+    "frontend"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/staticsenju/animepahe-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/staticsenju/animepahe-web/issues"
+  },
+  "homepage": "https://github.com/staticsenju/animepahe-web#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -2,6 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
+import axios from 'axios';
 import { resolveSessionFromNumeric } from './resolver.js';
 import { upstream } from './upstream.js';
 import {

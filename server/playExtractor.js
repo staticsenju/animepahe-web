@@ -1,4 +1,4 @@
-import axios from 'axios';
+eimport axios from 'axios';
 import crypto from 'crypto';
 import * as cheerio from 'cheerio';
 import vm from 'vm';
@@ -9,13 +9,11 @@ const UA = process.env.USER_AGENT ||
 
 const DEBUG = !!process.env.DEBUG_PLAYLIST_EXTRACTION;
 
-/* ================= Cookie ================= */
 export function generateCookie() {
   const raw = crypto.randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
   return `__ddg2_=${raw}`;
 }
 
-/* ================= HTTP Helpers ================= */
 function httpForAnime(cookie) {
   return axios.create({
     baseURL: DEFAULT_HOST,
@@ -48,7 +46,6 @@ async function fetchHtmlAbsolute(url, cookie, referer) {
   return { html: resp.data, finalUrl: resp.request?.res?.responseUrl || url };
 }
 
-/* ================= Anime Page ================= */
 export async function fetchPlayPage(slug, episodeSession, cookie) {
   const http = httpForAnime(cookie);
   const path = `/play/${slug}/${episodeSession}`;
@@ -96,37 +93,26 @@ export function chooseButton(buttons, { audio, resolution }) {
   return candidates[0] || null;
 }
 
-/* ================= Playlist Extraction ================= */
-
-/**
- * Main exported function: tries to obtain the .m3u8 URL from a kwik-like mirror.
- */
 export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
   if (!mirrorUrl) throw new Error('mirrorUrl is required');
   const norm = normalizeUrl(mirrorUrl);
 
-  // 1. Fetch mirror page
   const { html: initialHtml } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
 
-  // Handle meta refresh if present
   const redirectedHtml = await followMetaRefreshIfAny(initialHtml, cookie, norm);
 
   const html = redirectedHtml || initialHtml;
 
-  // 2. Collect scripts
   const scripts = extractAllScripts(html);
 
-  // 3. Run multi-stage eval capture
   const chainResult = deobfuscateByEvalChain(scripts);
 
-  // 4. Aggregate all code fragments to search
   const codeCorpus = [
     ...scripts,
     ...chainResult.capturedEvalStrings,
     chainResult.combinedEvalOutput
   ].join('\n\n/* ---- */\n\n');
-
-  // 5. Try heuristics
+  
   const playlist = extractPlaylistFromCorpus(codeCorpus) ||
                    extractPlaylistFromCorpus(html) ||
                    scanBase64ForPlaylist(codeCorpus) ||
@@ -157,16 +143,10 @@ export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
   };
 }
 
-/* ================= Deobfuscation Core ================= */
-
-/**
- * Recursively intercept nested eval code.
- */
 function deobfuscateByEvalChain(scriptBodies) {
   const capturedEvalStrings = [];
   const stagesMeta = [];
-
-  // We process any script that contains eval( or suspicious patterns
+  
   const queue = scriptBodies
     .filter(s => /eval\(/.test(s) || /source\s*=/.test(s))
     .slice();
@@ -181,9 +161,7 @@ function deobfuscateByEvalChain(scriptBodies) {
     const stageLogs = [];
     const nestedCaptured = [];
     const sandbox = makeSandbox(nestedCaptured, stageLogs);
-
-    // Replace direct eval( with eval( to intercept; we override eval in sandbox.
-    const prepared = original; // we rely on sandbox.eval override now.
+    const prepared = original;
 
     let error = null;
     try {
@@ -199,7 +177,6 @@ function deobfuscateByEvalChain(scriptBodies) {
       error: error ? (error.message || String(error)) : null
     });
 
-    // Add nested captured strings
     for (const nested of nestedCaptured) {
       capturedEvalStrings.push(nested);
       if (!seen.has(nested) && /eval\(/.test(nested)) {
@@ -215,9 +192,6 @@ function deobfuscateByEvalChain(scriptBodies) {
   };
 }
 
-/**
- * Sandbox with eval overridden.
- */
 function makeSandbox(nestedCaptured, stageLogs) {
   const sandbox = {
     console: {
@@ -225,12 +199,10 @@ function makeSandbox(nestedCaptured, stageLogs) {
         stageLogs.push(args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
       }
     },
-    // Intercept eval
     eval: (arg) => {
       try {
         if (typeof arg === 'string') {
           nestedCaptured.push(arg);
-          // Attempt execution to go deeper:
           try {
             return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
           } catch (inner) {
@@ -264,9 +236,6 @@ function makeSandbox(nestedCaptured, stageLogs) {
   sandbox.globalThis = sandbox;
   return sandbox;
 }
-
-/* ================= Extraction Heuristics ================= */
-
 const PLAYLIST_REGEXES = [
   /source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
   /['"]([^'"]+\.m3u8[^'"]*)['"]\s*[,;)]/i,
@@ -289,7 +258,6 @@ function extractPlaylistFromCorpus(text) {
 
 function scanBase64ForPlaylist(text) {
   if (!text) return null;
-  // Find base64-ish blobs 60+ chars likely
   const candidates = text.match(/[A-Za-z0-9+/=]{40,}/g) || [];
   for (const c of candidates.slice(0, 200)) {
     try {
@@ -300,7 +268,6 @@ function scanBase64ForPlaylist(text) {
         if (pl) return sanitizeUrl(pl);
       }
     } catch {
-      /* ignore */
     }
   }
   return null;
@@ -308,7 +275,6 @@ function scanBase64ForPlaylist(text) {
 
 function sanitizeUrl(u) {
   if (!u) return u;
-  // Remove trailing characters like &quot; or ')
   return u.replace(/&quot;?$/,'').replace(/['")\\]+$/,'').trim();
 }
 
@@ -324,14 +290,12 @@ function extractAllScripts(html) {
   return out;
 }
 
-/* ================= Meta Refresh ================= */
 async function followMetaRefreshIfAny(html, cookie, refererUrl) {
   const meta = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]*>/i);
   if (!meta) return null;
   const urlMatch = meta[0].match(/url=([^"'>\s]+)/i);
   if (!urlMatch) return null;
   const target = urlMatch[1];
-  // If relative
   let absolute = target;
   if (!/^https?:/i.test(absolute)) {
     const base = refererUrl.split('/').slice(0, 3).join('/');
@@ -341,11 +305,9 @@ async function followMetaRefreshIfAny(html, cookie, refererUrl) {
   return followHtml;
 }
 
-/* ================= URL Helpers ================= */
 function normalizeUrl(u) {
   if (u.startsWith('//')) return 'https:' + u;
   if (!/^https?:/i.test(u)) {
-    // If it's something like /e/abc
     if (u.startsWith('/')) return 'https://kwik.si' + u;
     return 'https://kwik.si/' + u.replace(/^\/+/, '');
   }

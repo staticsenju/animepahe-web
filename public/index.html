@@ -332,7 +332,7 @@ async function loadStream(episodeId, episodeSession) {
   els.streamLinks.innerHTML = '';
   els.streamInfo.textContent = 'Loading stream links...';
   try {
-    const url = `${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}&session=${encodeURIComponent(episodeSession)}`;
+    const url = `${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}&session=${encodeURIComponent(session)}`;
     const data = await fetchJSON(url);
     const links = Array.isArray(data?.data?.links) ? data.data.links
                 : Array.isArray(data?.links) ? data.links

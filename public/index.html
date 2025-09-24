@@ -236,7 +236,7 @@ async function loadEpisodes(animeId) {
   els.episodes.innerHTML = '';
   els.episodesInfo.textContent = 'Loading...';
   try {
-    const data = await fetchJSON(`${apiBase}/api/episodes?id=${encodeURIComponent(animeId)}`);
+    const data = await fetchJSON(`${apiBase}/api/episodes?id=${encodeURIComponent(session)}`);
     const episodes = data.data?.episodes || data.data || data.episodes || [];
     els.episodesInfo.textContent = `${episodes.length} episode(s)`;
     episodes.forEach(ep => {

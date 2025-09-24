@@ -137,8 +137,12 @@ app.get('/api/stream', async (req, res) => {
   const epSession = (req.query.session || '').trim();
 
   if (!episodeId || !epSession) {
+    const looksLikeSession = episodeId && episodeId.length > 40 && !epSession;
     return res.status(400).json({
-      error: 'Missing required parameters: episodeId AND session are both needed'
+      error: 'Missing required parameters: episodeId AND session are required',
+      hint: looksLikeSession
+        ? 'It looks like you passed the episode session as episodeId. Provide the numeric episode id in episodeId and the long hash in session.'
+        : 'Call /api/episodes first; each episode includes id (numeric) and session.'
     });
   }
 

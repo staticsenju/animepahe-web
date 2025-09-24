@@ -135,26 +135,38 @@ app.get('/api/episodes', async (req, res) => {
 app.get('/api/stream', async (req, res) => {
   const episodeId = (req.query.episodeId || '').trim();
   const epSession = (req.query.session || '').trim();
+  const looksLikeSessionHash = episodeId && episodeId.length > 40 && !epSession;
+
 
   if (!episodeId || !epSession) {
-    const looksLikeSession = episodeId && episodeId.length > 40 && !epSession;
-    console.log('STREAM QUERY', params.toString());
     return res.status(400).json({
       error: 'Missing required parameters: episodeId AND session are required',
-      hint: looksLikeSession
-        ? 'It looks like you passed the episode session as episodeId. Provide the numeric episode id in episodeId and the long hash in session.'
-        : 'Call /api/episodes first; each episode includes id (numeric) and session.'
+      hint: looksLikeSessionHash
+        ? 'You passed the episode session as episodeId. Provide the numeric episode id in episodeId and the long hash in session.'
+        : 'Call /api/episodes first; each episode object has id (numeric) and session (hash).'
     });
   }
 
   try {
     const params = new URLSearchParams({ m: 'links', id: episodeId, session: epSession });
+    console.log('STREAM QUERY', params.toString());
     const { data } = await upstream.get('?' + params.toString());
     res.json(data);
   } catch (e) {
-    sendUpstreamError(res, e, 'Failed to fetch stream links');
+    if (e?.response) {
+      return res.status(e.response.status).json({
+        error: 'Failed to fetch stream links',
+        upstreamStatus: e.response.status,
+        upstreamBody: e.response.data
+      });
+    }
+    if (e?.code === 'ECONNABORTED') {
+      return res.status(504).json({ error: 'Upstream timeout' });
+    }
+    res.status(500).json({ error: 'Failed to fetch stream links' });
   }
 });
+
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 

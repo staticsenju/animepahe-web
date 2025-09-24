@@ -82,7 +82,6 @@ export function chooseButton(buttons, { audio, resolution }) {
     if (resFiltered.length) candidates = resFiltered;
   }
 
-  // Prefer non AV1
   const nonAv1 = candidates.filter(b => b.av1 === '0');
   if (nonAv1.length) candidates = nonAv1;
 
@@ -203,12 +202,12 @@ function makeSandbox(nestedCaptured, stageLogs) {
       try {
         if (typeof arg === 'string') {
           nestedCaptured.push(arg);
-          try {
-            return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
-          } catch (inner) {
-            stageLogs.push('[eval-exec-error] ' + inner.message);
-          }
-          return arg;
+            try {
+              return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
+            } catch (inner) {
+              stageLogs.push('[eval-exec-error] ' + inner.message);
+            }
+            return arg;
         }
         return arg;
       } catch (e) {
@@ -278,7 +277,6 @@ function sanitizeUrl(u) {
   return u.replace(/&quot;?$/,'').replace(/['")\\]+$/,'').trim();
 }
 
-/* ================= Script Collection ================= */
 function extractAllScripts(html) {
   const out = [];
   const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;

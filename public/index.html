@@ -12,7 +12,7 @@
     --error:#ef4444;--warn:#f59e0b;--card:#1d1f24;--border:#2a2d33;
     --muted:#888;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing:border-box; }
   body {
     margin:0;
     font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;
@@ -184,13 +184,6 @@
     white-space:pre-wrap;
     word-break:break-word;
   }
-  .split {
-    display:grid;
-    gap:.65rem;
-    grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
-    margin-bottom:.5rem;
-  }
-  .label { font-size:.6rem; font-weight:600; opacity:.8; margin-bottom:.2rem; letter-spacing:.5px; text-transform:uppercase; }
   .pill {
     background:#2b3038;
     padding:4px 8px;
@@ -244,16 +237,13 @@
   <span id="status" class="status-line"></span>
 </header>
 <main>
-  <!-- Search Results -->
   <section id="searchSection">
     <h2>Results</h2>
     <ul id="resultsList"></ul>
   </section>
 
-    <!-- Episodes + Player -->
   <section id="playerSection">
     <h2>Player</h2>
-
     <div class="controls-row">
       <select id="resolutionSelect">
         <option value="">Auto Resolution</option>
@@ -278,17 +268,16 @@
     </div>
 
     <div>
-      <div class="label">Mirrors</div>
+      <div class="small" style="font-weight:600;letter-spacing:.5px;opacity:.8;text-transform:uppercase;margin-bottom:.3rem;">Mirrors</div>
       <div id="mirrorList" class="mirror-list"></div>
     </div>
 
     <div style="margin-top:.7rem;">
-      <div class="label">Episodes</div>
+      <div class="small" style="font-weight:600;letter-spacing:.5px;opacity:.8;text-transform:uppercase;margin-bottom:.3rem;">Episodes</div>
       <ul id="episodesList" style="max-height:230px;"></ul>
     </div>
   </section>
 
-  <!-- Debug / Logs -->
   <section id="debugSection">
     <h2>Debug</h2>
     <div class="inline-group" style="margin-bottom:.4rem;">
@@ -296,33 +285,31 @@
       <button id="toggleAutoPlayBtn" style="background:#374151;">Autoplay: Off</button>
     </div>
     <pre class="debug" id="debug">(empty)</pre>
-
     <div style="margin-top:.75rem;">
-      <div class="label">Subtitle Tracks (Parsed)</div>
+      <div class="small" style="font-weight:600;letter-spacing:.5px;opacity:.8;text-transform:uppercase;margin-bottom:.4rem;">Subtitle Tracks (Parsed)</div>
       <div id="subtitleTracks" class="subtitle-tracks"></div>
     </div>
   </section>
 </main>
 
-<!-- hls.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
-/* ---------- State ---------- */
+/* ========== STATE ========== */
 let searchResults = [];
-let selectedAnime = null;          // { title, session, slug? }
-let episodes = [];                 // array of episode objects
-let currentEpisode = null;         // episode object
-let lastMirrorData = null;         // full payload from /api/play
+let selectedAnime = null;
+let episodes = [];
+let currentEpisode = null;
+let lastMirrorData = null;
 let hlsInstance = null;
 let autoplay = false;
 let lastPlaylistUrl = '';
 let appliedResolution = '';
 let appliedAudio = '';
-let subtitleTracks = [];           // extracted from m3u8 master
+let subtitleTracks = [];
 let activeSubtitleUri = '';
 let activeSubtitleLabel = '';
 
-/* ---------- DOM Shortcuts ---------- */
+/* ========== DOM ========== */
 const $ = id => document.getElementById(id);
 const els = {
   searchInput: $('searchInput'),
@@ -345,19 +332,18 @@ const els = {
   subtitleTracks: $('subtitleTracks')
 };
 
-/* ---------- Utility ---------- */
+/* ========== UTIL ========== */
 function setStatus(msg, kind='') {
   els.status.textContent = msg;
-  els.status.className = 'status-line ' + (kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : '');
+  els.status.className = 'status-line ' + (kind==='error'?'error':kind==='warn'?'warn':'');
 }
 function setPlayerStatus(msg, kind='') {
   els.playerStatus.textContent = msg;
-  els.playerStatus.className = 'small ' + (kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : '');
+  els.playerStatus.className = 'small ' + (kind==='error'?'error':kind==='warn'?'warn':'');
 }
 function debugLog(obj, label='') {
   let prev = els.debug.textContent === '(empty)' ? '' : els.debug.textContent + '\\n\\n';
-  const line = (label ? ('[' + label + '] ') : '') +
-    (typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
+  const line = (label ? '[' + label + '] ' : '') + (typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
   els.debug.textContent = prev + line;
   els.debug.scrollTop = els.debug.scrollHeight;
 }
@@ -367,19 +353,18 @@ function clearDebug() {
 function spinnerHtml() { return '<span class="spinner"></span>'; }
 
 function formatEpisodeLi(ep) {
-  const disc = ep.disc ? `<span class="badge">${ep.disc}</span>` : '';
-  const audio = ep.audio ? `<span class="badge">${ep.audio}</span>` : '';
+  const disc = ep.disc ? '<span class="badge">'+ep.disc+'</span>' : '';
+  const audio = ep.audio ? '<span class="badge">'+ep.audio+'</span>' : '';
   return `
     <div class="meta-row">
-      <strong>#${ep.episode}</strong>
+      <strong>#${ep.episode ?? '?'}</strong>
       ${disc}${audio}
     </div>
     <div class="small">${ep.duration || ''}</div>
   `;
 }
 
-/* ---------- Search / Fetch ---------- */
-/* Expect a backend route similar to /api/search?q= */
+/* ========== SEARCH ========== */
 async function doSearch() {
   const q = els.searchInput.value.trim();
   if (!q) { setStatus('Enter a search term'); return; }
@@ -403,11 +388,11 @@ function renderSearchResults() {
     const li = document.createElement('li');
     li.className = 'item';
     li.innerHTML = `
-      <div>${item.title || 'Untitled'}</div>
+      <div>${(item.title || 'Untitled')}</div>
       <div class="small">${(item.type || '')} ${(item.year || '')}</div>
     `;
     li.addEventListener('click', () => {
-      document.querySelectorAll('#resultsList .item').forEach(n => n.classList.remove('active'));
+      [...els.resultsList.querySelectorAll('.item')].forEach(n => n.classList.remove('active'));
       li.classList.add('active');
       selectAnime(item);
     });
@@ -415,7 +400,7 @@ function renderSearchResults() {
   });
 }
 
-/* Assume item has session or slug usable as id for episodes */
+/* ========== EPISODES ========== */
 async function selectAnime(item) {
   selectedAnime = item;
   episodes = [];
@@ -425,8 +410,9 @@ async function selectAnime(item) {
   setStatus('Loading episodes...' + spinnerHtml());
 
   try {
-    // episodes endpoint: /api/episodes?id=<animeSession>
-    const epRes = await fetch('/api/episodes?id=' + encodeURIComponent(item.session || item.id || item.slug));
+    const id = item.session || item.id || item.slug;
+    if (!id) throw new Error('Missing anime session/id');
+    const epRes = await fetch('/api/episodes?id=' + encodeURIComponent(id));
     if (!epRes.ok) throw new Error('Episodes fetch failed ' + epRes.status);
     const epData = await epRes.json();
     episodes = epData?.episodes || epData?.data || [];
@@ -445,7 +431,7 @@ function renderEpisodes() {
     li.className = 'item';
     li.innerHTML = formatEpisodeLi(ep);
     li.addEventListener('click', () => {
-      document.querySelectorAll('#episodesList .item').forEach(n => n.classList.remove('active'));
+      [...els.episodesList.querySelectorAll('.item')].forEach(n => n.classList.remove('active'));
       li.classList.add('active');
       loadEpisode(ep);
     });
@@ -453,7 +439,7 @@ function renderEpisodes() {
   });
 }
 
-/* ---------- Player Flow using new /api/play/:slug/:epSession ---------- */
+/* ========== PLAYER / MIRRORS ========== */
 function clearPlayerUI() {
   els.mirrorList.innerHTML = '';
   resetSelects();
@@ -486,7 +472,6 @@ async function loadEpisode(ep) {
     const slug = (selectedAnime?.slug || selectedAnime?.session || selectedAnime?.id || '').trim();
     if (!slug || !ep.session) throw new Error('Missing slug or episode session');
 
-    // list only to gather mirrors
     const url = `/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(ep.session)}?listOnly=true`;
     const res = await fetch(url);
     const data = await res.json();
@@ -498,7 +483,6 @@ async function loadEpisode(ep) {
     els.applyBtn.disabled = false;
     els.refreshMirrorsBtn.disabled = false;
 
-    // Immediately fetch a playlist with current (auto) filters to start playback
     await resolveAndPlayCurrentFilters(false);
 
   } catch (e) {
@@ -511,41 +495,35 @@ function populateFilterSelectors(buttons) {
   const resSet = [...new Set(buttons.map(b => b.resolution).filter(Boolean))].sort((a,b)=>parseInt(b)-parseInt(a));
   const audioSet = [...new Set(buttons.map(b => b.audio).filter(Boolean))];
   resSet.forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r;
-    opt.textContent = r + 'p';
-    els.resolutionSelect.appendChild(opt);
+    const opt = document.createElement('option'); opt.value = r; opt.textContent = r + 'p'; els.resolutionSelect.appendChild(opt);
   });
   audioSet.forEach(a => {
-    const opt = document.createElement('option');
-    opt.value = a;
-    opt.textContent = a;
-    els.audioSelect.appendChild(opt);
+    const opt = document.createElement('option'); opt.value = a; opt.textContent = a; els.audioSelect.appendChild(opt);
   });
 }
 
 function renderMirrors(buttons) {
   els.mirrorList.innerHTML = '';
-  buttons.forEach((b,i)=>{
+  buttons.forEach(b => {
     const div = document.createElement('div');
     div.className = 'mirror';
+    const hostDisplay = (b.src || '').replace(/^https?:\/\//,'').slice(0,80);
     div.innerHTML = `
       <div style="flex:1;min-width:0;">
         <div style="font-size:.65rem;font-weight:600;letter-spacing:.5px;">
-          ${b.resolution || '?'}p
+          ${(b.resolution || '?')}p
           <span class="pill">${b.audio || '?'}</span>
           ${b.av1 === '1' ? '<span class="pill" style="background:#4338ca;">AV1</span>' : ''}
         </div>
-        <div class="small" style="opacity:.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-          ${b.src.replace(/^https?:\\/\\//,'')}
+        <div class="small" style="opacity:.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${hostDisplay}
         </div>
       </div>
       <div class="inline-group" style="flex-shrink:0;">
-        <button data-idx="${i}" class="resolveBtn">Play</button>
+        <button class="resolveBtn">Play</button>
       </div>
     `;
     div.querySelector('.resolveBtn').addEventListener('click', async () => {
-      // Force selection by setting filters to that mirror's attributes then resolving
       els.resolutionSelect.value = b.resolution || '';
       els.audioSelect.value = b.audio || '';
       await resolveAndPlayCurrentFilters(true);
@@ -579,11 +557,9 @@ async function resolveAndPlayCurrentFilters(userInitiated) {
 
     await playHls(data.playlist);
     setPlayerStatus(
-      `Playing EP ${currentEpisode.episode} ${appliedResolution || 'AUTO'} ${appliedAudio || ''}`.trim(),
-      ''
+      `Playing EP ${currentEpisode.episode} ${(appliedResolution || 'AUTO')} ${(appliedAudio || '')}`.trim()
     );
 
-    // Parse subtitles if any present in master playlist
     await fetchAndExtractSubtitles(data.playlist);
 
   } catch (e) {
@@ -592,26 +568,20 @@ async function resolveAndPlayCurrentFilters(userInitiated) {
   }
 }
 
-/* ---------- HLS Playback & Subtitles ---------- */
+/* ========== HLS & SUBTITLES ========== */
 async function playHls(url) {
   if (hlsInstance) {
     hlsInstance.destroy();
     hlsInstance = null;
   }
-  // Clear existing <track>
   [...els.video.querySelectorAll('track')].forEach(t => t.remove());
   if (window.Hls && Hls.isSupported()) {
-    hlsInstance = new Hls({
-      enableWorker:true,
-      lowLatencyMode:true
-    });
+    hlsInstance = new Hls({ enableWorker:true, lowLatencyMode:true });
     hlsInstance.loadSource(url);
     hlsInstance.attachMedia(els.video);
     hlsInstance.on(Hls.Events.ERROR, (evt,data)=>{
       debugLog({evt,data}, 'hls-error');
-      if (data?.fatal) {
-        setPlayerStatus('Fatal HLS error', 'error');
-      }
+      if (data?.fatal) setPlayerStatus('Fatal HLS error', 'error');
     });
   } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
     els.video.src = url;
@@ -620,14 +590,12 @@ async function playHls(url) {
   }
 }
 
-/* Fetch playlist text and parse EXT-X-MEDIA for subtitles */
 async function fetchAndExtractSubtitles(masterUrl) {
   subtitleTracks = [];
   activeSubtitleUri = '';
   activeSubtitleLabel = '';
   renderSubtitleTracks();
   updateSubtitleSelect();
-
   try {
     const res = await fetch(masterUrl);
     if (!res.ok) throw new Error('Cannot fetch master m3u8');
@@ -641,23 +609,21 @@ async function fetchAndExtractSubtitles(masterUrl) {
 }
 
 function parseSubtitlesFromM3U8(text, baseUrl) {
-  // Base path for relative subtitle URIs
   const base = baseUrl.split('/').slice(0,-1).join('/');
-  const lines = text.split(/\\r?\\n/);
-  for (let i=0;i<lines.length;i++) {
-    const line = lines[i];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
     if (line.startsWith('#EXT-X-MEDIA') && /TYPE=SUBTITLES/.test(line)) {
-      const uriMatch = line.match(/URI="([^"]+)"/);
+      const uriMatch  = line.match(/URI="([^"]+)"/);
       const langMatch = line.match(/LANGUAGE="([^"]+)"/);
       const nameMatch = line.match(/NAME="([^"]+)"/);
       if (uriMatch) {
         let uri = uriMatch[1];
         if (!/^https?:/i.test(uri)) {
-          uri = base + '/' + uri.replace(/^\\.\\//,'');
+          uri = base + '/' + uri.replace(/^\.\//,'');
         }
         subtitleTracks.push({
           uri,
-            lang: langMatch ? langMatch[1] : '',
+          lang: langMatch ? langMatch[1] : '',
           label: nameMatch ? nameMatch[1] : (langMatch ? langMatch[1] : 'Subtitle'),
           raw: line
         });
@@ -692,7 +658,7 @@ function renderSubtitleTracks() {
     div.className = 'subtitle-track' + (t.uri === activeSubtitleUri ? ' active':'');
     div.innerHTML = `
       <div style="flex:1;min-width:0;">
-        <div style="font-weight:600;">${t.label || t.lang || 'Track '+(i+1)}</div>
+        <div style="font-weight:600;">${t.label || t.lang || ('Track '+(i+1))}</div>
         <div class="small" style="opacity:.55;">${t.lang || ''}</div>
       </div>
       <button data-idx="${i}" style="background:#374151;">Load</button>
@@ -702,7 +668,6 @@ function renderSubtitleTracks() {
   });
 }
 
-/* Load selected subtitle track as a WebVTT <track>. If it's HLS again, attempt to fetch & merge lines */
 async function applySubtitleTrack(index) {
   if (index === '' || index == null) {
     activeSubtitleUri = '';
@@ -720,40 +685,33 @@ async function applySubtitleTrack(index) {
     const res = await fetch(track.uri);
     if (!res.ok) throw new Error('Subtitle fetch failed');
     const text = await res.text();
-
     let finalVtt = '';
-    if (/\\.vtt($|\\?)/i.test(track.uri) || text.startsWith('WEBVTT')) {
+    if (/\.vtt($|\?)/i.test(track.uri) || text.startsWith('WEBVTT')) {
       finalVtt = text.startsWith('WEBVTT') ? text : 'WEBVTT\\n\\n' + text;
-    } else if (/\\.m3u8($|\\?)/i.test(track.uri) || text.includes('#EXTM3U')) {
-      // If the subtitle track is itself an HLS playlist, we can attempt to join segments (simple approach)
+    } else if (/\.m3u8($|\?)/i.test(track.uri) || text.includes('#EXTM3U')) {
       finalVtt = 'WEBVTT\\n\\n';
       const base = track.uri.split('/').slice(0,-1).join('/');
-      const lines = text.split(/\\r?\\n/);
-      const segmentUris = lines.filter(l => l && !l.startsWith('#'));
-      for (const seg of segmentUris) {
+      const lines = text.split(/\r?\n/).filter(l => l && !l.startsWith('#'));
+      for (const seg of lines) {
         let segUrl = seg;
-        if (!/^https?:/i.test(segUrl)) segUrl = base + '/' + seg.replace(/^\\.\\//,'');
+        if (!/^https?:/i.test(segUrl)) segUrl = base + '/' + seg.replace(/^\.\//,'');
         try {
           const segResp = await fetch(segUrl);
           if (segResp.ok) {
             const segText = await segResp.text();
-            // naive append
-            finalVtt += segText.replace(/^WEBVTT.*?\\n+/i,'') + '\\n';
+            finalVtt += segText.replace(/^WEBVTT.*?\n+/i,'') + '\\n';
           }
         } catch {}
       }
     } else {
-      // Attempt naive SRT -> VTT conversion (very basic)
-      if (text.match(/\\d+\\s+\\d{2}:\\d{2}:\\d{2}/)) {
+      if (text.match(/\d+\s+\d{2}:\d{2}:\d{2}/)) {
         finalVtt = 'WEBVTT\\n\\n' + text
-          .replace(/,(\\d{3})/g,'.$1')  // convert comma milliseconds
-          .replace(/^(\\d+)\\s*$/gm,''); // remove index lines
+          .replace(/,(\d{3})/g, '.$1')
+          .replace(/^\d+\s*$/gm,'');
       } else {
         finalVtt = 'WEBVTT\\n\\n' + text;
       }
     }
-
-    // Remove old
     [...els.video.querySelectorAll('track')].forEach(t => t.remove());
     const blob = new Blob([finalVtt], { type:'text/vtt' });
     const url = URL.createObjectURL(blob);
@@ -764,7 +722,6 @@ async function applySubtitleTrack(index) {
     trackEl.default = true;
     trackEl.src = url;
     els.video.appendChild(trackEl);
-
     renderSubtitleTracks();
     setPlayerStatus('Subtitle loaded: ' + (track.label || track.lang || ''), '');
     debugLog(track.uri, 'subtitle-loaded');
@@ -774,32 +731,22 @@ async function applySubtitleTrack(index) {
   }
 }
 
-/* ---------- Event Handlers ---------- */
+/* ========== EVENTS ========== */
 els.searchBtn.addEventListener('click', doSearch);
 els.searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-
 els.applyBtn.addEventListener('click', () => resolveAndPlayCurrentFilters(true));
-els.refreshMirrorsBtn.addEventListener('click', () => {
-  if (currentEpisode) loadEpisode(currentEpisode);
-});
-els.reloadPlaylistBtn.addEventListener('click', () => {
-  if (lastPlaylistUrl) playHls(lastPlaylistUrl);
-});
-
+els.refreshMirrorsBtn.addEventListener('click', () => { if (currentEpisode) loadEpisode(currentEpisode); });
+els.reloadPlaylistBtn.addEventListener('click', () => { if (lastPlaylistUrl) playHls(lastPlaylistUrl); });
 els.clearDebugBtn.addEventListener('click', clearDebug);
-
 els.toggleAutoPlayBtn.addEventListener('click', ()=>{
   autoplay = !autoplay;
   els.toggleAutoPlayBtn.textContent = 'Autoplay: ' + (autoplay ? 'On':'Off');
 });
-
-/* Autoplay next episode when ended */
 els.video.addEventListener('ended', () => {
   if (!autoplay || !currentEpisode) return;
   const idx = episodes.findIndex(e => e.session === currentEpisode.session);
   if (idx >= 0 && idx < episodes.length - 1) {
     const next = episodes[idx + 1];
-    // highlight
     const lis = els.episodesList.querySelectorAll('.item');
     if (lis[idx+1]) {
       lis.forEach(li => li.classList.remove('active'));
@@ -808,21 +755,15 @@ els.video.addEventListener('ended', () => {
     loadEpisode(next);
   }
 });
-
-/* Subtitle select change */
-els.subtitleSelect.addEventListener('change', (e)=>{
+els.subtitleSelect.addEventListener('change', e => {
   const val = e.target.value;
-  if (val === '') {
-    applySubtitleTrack('');
-  } else {
-    applySubtitleTrack(parseInt(val,10));
-  }
+  if (val === '') applySubtitleTrack('');
+  else applySubtitleTrack(parseInt(val,10));
 });
 
-/* ---------- Init ---------- */
+/* ========== INIT ========== */
 setStatus('Ready. Enter a search query.');
 debugLog('App initialized', 'init');
-
 </script>
 </body>
 </html>

@@ -2,270 +2,827 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Anime Search</title>
+<title>Animepahe Web</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
 <style>
   :root {
     color-scheme: dark light;
-    --bg:#111;--fg:#eee;--accent:#6c5ce7;--error:#e74c3c;--card:#1e1e1e;
+    --bg:#111;--fg:#eee;--accent:#6366f1;--accent-hover:#4f46e5;
+    --error:#ef4444;--warn:#f59e0b;--card:#1d1f24;--border:#2a2d33;
+    --muted:#888;
   }
-  body {margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;min-height:100vh;}
-  header {padding:1rem;background:#181818;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;}
-  input[type="text"] {flex:1 1 260px;padding:.6rem .75rem;border:1px solid #333;background:#222;color:var(--fg);border-radius:6px;font-size:1rem;}
-  button {background:var(--accent);color:#fff;border:none;padding:.65rem 1rem;font-size:1rem;border-radius:6px;cursor:pointer;}
-  button:disabled {opacity:.5;cursor:not-allowed;}
-  main {flex:1;display:grid;grid-template-columns:320px 1fr 400px;gap:1rem;padding:1rem;}
-  section {background:var(--card);border-radius:10px;padding:.75rem .9rem;overflow:auto;display:flex;flex-direction:column;gap:.5rem;}
-  h2 {margin:.2rem 0 .4rem;font-size:1.05rem;letter-spacing:.5px;text-transform:uppercase;opacity:.75;}
-  ul {list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem;}
-  li {background:#242424;border:1px solid #2f2f2f;border-radius:8px;padding:.55rem .7rem;cursor:pointer;display:flex;flex-direction:column;gap:.25rem;transition:background .15s;}
-  li:hover {background:#2c2c2c;}
-  .active {outline:2px solid var(--accent);}
-  .small {font-size:.75rem;opacity:.8;}
-  .error {color:var(--error);font-size:.85rem;margin-top:.25rem;}
-  .loading {opacity:.6;font-style:italic;}
-  .stream-links a {color:var(--accent);text-decoration:none;word-break:break-all;font-size:.8rem;}
-  .badge {display:inline-block;background:#333;padding:2px 6px;border-radius:4px;font-size:.65rem;margin-right:4px;letter-spacing:.5px;}
-  .row-actions {display:flex;gap:.5rem;flex-wrap:wrap;}
-  pre.debug {background:#000;padding:.5rem;border-radius:6px;max-height:200px;overflow:auto;font-size:.65rem;}
-  @media (max-width:1150px){main{grid-template-columns:1fr 1fr;}section:nth-child(3){grid-column:span 2;}}
-  @media (max-width:800px){main{grid-template-columns:1fr;}section:nth-child(2),section:nth-child(3){grid-column:1;}}
+  * { box-sizing: border-box; }
+  body {
+    margin:0;
+    font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  header {
+    background:#181a1f;
+    padding:.75rem 1rem;
+    display:flex;
+    gap:.65rem;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  header input[type="text"] {
+    flex:1 1 260px;
+    padding:.55rem .7rem;
+    background:#22252b;
+    border:1px solid var(--border);
+    color:var(--fg);
+    border-radius:6px;
+    font-size:.95rem;
+  }
+  button {
+    background:var(--accent);
+    color:#fff;
+    border:none;
+    padding:.6rem 1rem;
+    font-size:.9rem;
+    border-radius:6px;
+    cursor:pointer;
+    line-height:1;
+    font-weight:600;
+    letter-spacing:.3px;
+  }
+  button:hover { background:var(--accent-hover); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  main {
+    flex:1;
+    display:grid;
+    grid-template-columns:320px minmax(0,1fr) 380px;
+    gap:1rem;
+    padding:1rem;
+  }
+  section {
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:.85rem .95rem 1rem;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+    min-height:0;
+  }
+  h2 {
+    margin:.1rem 0 .6rem;
+    font-size:.9rem;
+    font-weight:600;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+    opacity:.75;
+  }
+  ul {
+    list-style:none;
+    padding:0;
+    margin:0;
+    display:flex;
+    flex-direction:column;
+    gap:.45rem;
+    overflow:auto;
+  }
+  li.item {
+    background:#23262d;
+    border:1px solid #2d3036;
+    padding:.55rem .65rem;
+    border-radius:8px;
+    cursor:pointer;
+    display:flex;
+    flex-direction:column;
+    gap:.25rem;
+    transition:background .15s,border-color .2s;
+  }
+  li.item:hover { background:#2a2d35; }
+  li.item.active { outline:2px solid var(--accent); }
+  .small { font-size:.7rem; opacity:.65; letter-spacing:.5px; }
+  .meta-row { display:flex; gap:.4rem; flex-wrap:wrap; }
+  .badge {
+    font-size:.6rem;
+    text-transform:uppercase;
+    background:#30353f;
+    padding:2px 6px;
+    border-radius:4px;
+    letter-spacing:.6px;
+  }
+  .status-line { font-size:.7rem; opacity:.75; }
+  .error { color:var(--error); }
+  .warn { color:var(--warn); }
+  .flex { display:flex; }
+  .grow { flex:1 1 auto; }
+  .controls-row {
+    display:flex;
+    flex-wrap:wrap;
+    gap:.55rem;
+    margin-bottom:.65rem;
+  }
+  select, input[type="number"] {
+    background:#22252b;
+    border:1px solid var(--border);
+    color:var(--fg);
+    padding:.5rem .55rem;
+    border-radius:6px;
+    font-size:.75rem;
+    min-width:110px;
+  }
+  .player-wrapper {
+    position:relative;
+    width:100%;
+    background:#000;
+    border-radius:10px;
+    overflow:hidden;
+    aspect-ratio:16/9;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  video {
+    width:100%;
+    height:100%;
+    background:#000;
+  }
+  .mirror-list {
+    display:flex;
+    flex-direction:column;
+    gap:.4rem;
+    max-height:180px;
+    overflow:auto;
+    padding-right:.25rem;
+  }
+  .mirror {
+    border:1px solid #2c3037;
+    background:#252a31;
+    padding:.45rem .55rem;
+    border-radius:8px;
+    font-size:.65rem;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:.75rem;
+  }
+  .mirror.active { border-color:var(--accent); background:#2d3340; }
+  .mirror button {
+    padding:.3rem .55rem;
+    font-size:.6rem;
+    font-weight:600;
+  }
+  pre.debug {
+    background:#0e1114;
+    margin:0;
+    padding:.6rem .7rem;
+    border-radius:8px;
+    font-size:.6rem;
+    line-height:1.25;
+    max-height:220px;
+    overflow:auto;
+    border:1px solid #1f242b;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+  .split {
+    display:grid;
+    gap:.65rem;
+    grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+    margin-bottom:.5rem;
+  }
+  .label { font-size:.6rem; font-weight:600; opacity:.8; margin-bottom:.2rem; letter-spacing:.5px; text-transform:uppercase; }
+  .pill {
+    background:#2b3038;
+    padding:4px 8px;
+    border-radius:14px;
+    font-size:.55rem;
+    letter-spacing:.5px;
+  }
+  .inline-group { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+  .subtitle-track {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:#262b33;
+    border:1px solid #30363f;
+    padding:.4rem .55rem;
+    border-radius:6px;
+    font-size:.6rem;
+  }
+  .subtitle-track.active { border-color:var(--accent); background:#303846; }
+  .subtitle-tracks {
+    display:flex;
+    flex-direction:column;
+    gap:.35rem;
+    max-height:150px;
+    overflow:auto;
+  }
+  .spinner {
+    width:14px;height:14px;
+    border:3px solid #2d3340;
+    border-top-color:var(--accent);
+    border-radius:50%;
+    animation:spin .75s linear infinite;
+    display:inline-block;
+    vertical-align:middle;
+    margin-left:.4rem;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (max-width:1350px){
+    main { grid-template-columns:300px 1fr; }
+    main section:last-child { grid-column:1 / -1; }
+  }
+  @media (max-width:900px){
+    main { grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <input id="searchInput" type="text" placeholder="Search anime..." />
+  <input id="searchInput" type="text" placeholder="Search anime..." autocomplete="off" />
   <button id="searchBtn">Search</button>
-  <span id="status" class="small"></span>
+  <span id="status" class="status-line"></span>
 </header>
 <main>
-  <section>
+  <!-- Search Results -->
+  <section id="searchSection">
     <h2>Results</h2>
-    <div id="searchInfo" class="small"></div>
-    <ul id="results"></ul>
+    <ul id="resultsList"></ul>
   </section>
-  <section>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
-      <h2 style="margin:0;">Episodes</h2>
-      <div class="row-actions">
-        <button id="refreshEpisodesBtn" style="display:none;">Refresh</button>
-      </div>
+
+    <!-- Episodes + Player -->
+  <section id="playerSection">
+    <h2>Player</h2>
+
+    <div class="controls-row">
+      <select id="resolutionSelect">
+        <option value="">Auto Resolution</option>
+      </select>
+      <select id="audioSelect">
+        <option value="">Auto Audio</option>
+      </select>
+      <select id="subtitleSelect">
+        <option value="">Subtitles (None)</option>
+      </select>
+      <button id="applyBtn" disabled>Apply</button>
     </div>
-    <div id="selectedAnime" class="small"></div>
-    <div id="episodesInfo" class="small"></div>
-    <ul id="episodes"></ul>
+
+    <div class="player-wrapper">
+      <video id="video" controls playsinline preload="metadata"></video>
+    </div>
+
+    <div class="inline-group" style="margin:.65rem 0 .35rem;">
+      <button id="refreshMirrorsBtn" disabled>Refresh Mirrors</button>
+      <button id="reloadPlaylistBtn" disabled class="secondary">Reload Playlist</button>
+      <span id="playerStatus" class="small"></span>
+    </div>
+
+    <div>
+      <div class="label">Mirrors</div>
+      <div id="mirrorList" class="mirror-list"></div>
+    </div>
+
+    <div style="margin-top:.7rem;">
+      <div class="label">Episodes</div>
+      <ul id="episodesList" style="max-height:230px;"></ul>
+    </div>
   </section>
-  <section>
-    <h2>Stream Links</h2>
-    <div id="streamInfo" class="small"></div>
-    <div class="stream-links" id="streamLinks"></div>
-    <details>
-      <summary class="small">Debug</summary>
-      <div class="small">
-        Last stream request:<br>
-        <code id="lastStreamURL"></code>
-      </div>
-    </details>
+
+  <!-- Debug / Logs -->
+  <section id="debugSection">
+    <h2>Debug</h2>
+    <div class="inline-group" style="margin-bottom:.4rem;">
+      <button id="clearDebugBtn" style="background:#374151;">Clear</button>
+      <button id="toggleAutoPlayBtn" style="background:#374151;">Autoplay: Off</button>
+    </div>
+    <pre class="debug" id="debug">(empty)</pre>
+
+    <div style="margin-top:.75rem;">
+      <div class="label">Subtitle Tracks (Parsed)</div>
+      <div id="subtitleTracks" class="subtitle-tracks"></div>
+    </div>
   </section>
 </main>
+
+<!-- hls.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
-const apiBase = '';
+/* ---------- State ---------- */
+let searchResults = [];
+let selectedAnime = null;          // { title, session, slug? }
+let episodes = [];                 // array of episode objects
+let currentEpisode = null;         // episode object
+let lastMirrorData = null;         // full payload from /api/play
+let hlsInstance = null;
+let autoplay = false;
+let lastPlaylistUrl = '';
+let appliedResolution = '';
+let appliedAudio = '';
+let subtitleTracks = [];           // extracted from m3u8 master
+let activeSubtitleUri = '';
+let activeSubtitleLabel = '';
+
+/* ---------- DOM Shortcuts ---------- */
+const $ = id => document.getElementById(id);
 const els = {
-  searchInput: document.getElementById('searchInput'),
-  searchBtn: document.getElementById('searchBtn'),
-  status: document.getElementById('status'),
-  results: document.getElementById('results'),
-  episodes: document.getElementById('episodes'),
-  searchInfo: document.getElementById('searchInfo'),
-  episodesInfo: document.getElementById('episodesInfo'),
-  streamInfo: document.getElementById('streamInfo'),
-  streamLinks: document.getElementById('streamLinks'),
-  refreshEpisodesBtn: document.getElementById('refreshEpisodesBtn'),
-  selectedAnime: document.getElementById('selectedAnime'),
-  lastStreamURL: document.getElementById('lastStreamURL')
+  searchInput: $('searchInput'),
+  searchBtn: $('searchBtn'),
+  status: $('status'),
+  resultsList: $('resultsList'),
+  episodesList: $('episodesList'),
+  resolutionSelect: $('resolutionSelect'),
+  audioSelect: $('audioSelect'),
+  subtitleSelect: $('subtitleSelect'),
+  applyBtn: $('applyBtn'),
+  refreshMirrorsBtn: $('refreshMirrorsBtn'),
+  reloadPlaylistBtn: $('reloadPlaylistBtn'),
+  playerStatus: $('playerStatus'),
+  mirrorList: $('mirrorList'),
+  video: $('video'),
+  debug: $('debug'),
+  clearDebugBtn: $('clearDebugBtn'),
+  toggleAutoPlayBtn: $('toggleAutoPlayBtn'),
+  subtitleTracks: $('subtitleTracks')
 };
 
-let currentAnime = null;
-let currentEpisode = null;
-let lastEpisodesSession = null;
+/* ---------- Utility ---------- */
+function setStatus(msg, kind='') {
+  els.status.textContent = msg;
+  els.status.className = 'status-line ' + (kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : '');
+}
+function setPlayerStatus(msg, kind='') {
+  els.playerStatus.textContent = msg;
+  els.playerStatus.className = 'small ' + (kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : '');
+}
+function debugLog(obj, label='') {
+  let prev = els.debug.textContent === '(empty)' ? '' : els.debug.textContent + '\\n\\n';
+  const line = (label ? ('[' + label + '] ') : '') +
+    (typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
+  els.debug.textContent = prev + line;
+  els.debug.scrollTop = els.debug.scrollHeight;
+}
+function clearDebug() {
+  els.debug.textContent = '(empty)';
+}
+function spinnerHtml() { return '<span class="spinner"></span>'; }
 
-function setStatus(msg, loading=false){
-  els.status.textContent = msg || '';
-  els.status.className = loading ? 'small loading':'small';
+function formatEpisodeLi(ep) {
+  const disc = ep.disc ? `<span class="badge">${ep.disc}</span>` : '';
+  const audio = ep.audio ? `<span class="badge">${ep.audio}</span>` : '';
+  return `
+    <div class="meta-row">
+      <strong>#${ep.episode}</strong>
+      ${disc}${audio}
+    </div>
+    <div class="small">${ep.duration || ''}</div>
+  `;
 }
-async function fetchJSON(url){
-  const r = await fetch(url);
-  let body = null;
-  try { body = await r.json(); } catch {}
-  if(!r.ok){
-    const reason = body?.error || r.statusText;
-    throw new Error(`${r.status} ${reason}`);
-  }
-  return body;
-}
-function clearAll(){
-  els.results.innerHTML='';
-  els.episodes.innerHTML='';
-  els.streamLinks.innerHTML='';
-  els.searchInfo.textContent='';
-  els.episodesInfo.textContent='';
-  els.streamInfo.textContent='';
-  els.selectedAnime.textContent='';
-  currentAnime=null;
-  currentEpisode=null;
-  lastEpisodesSession=null;
-  els.refreshEpisodesBtn.style.display='none';
-}
-async function doSearch(){
+
+/* ---------- Search / Fetch ---------- */
+/* Expect a backend route similar to /api/search?q= */
+async function doSearch() {
   const q = els.searchInput.value.trim();
-  if(!q) return;
-  clearAll();
-  setStatus('Searching...', true);
-  els.searchBtn.disabled = true;
+  if (!q) { setStatus('Enter a search term'); return; }
+  setStatus('Searching...' + spinnerHtml());
   try {
-    const data = await fetchJSON(`${apiBase}/api/search?q=${encodeURIComponent(q)}`);
-    renderSearch(data);
-    setStatus('Search complete');
-  } catch(e){
-    setStatus('Search failed');
-    els.searchInfo.innerHTML = `<span class="error">Error: ${e.message}</span>`;
-  } finally {
-    els.searchBtn.disabled = false;
+    const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+    if (!res.ok) throw new Error(res.status + ' search failed');
+    const data = await res.json();
+    searchResults = data?.data || data?.results || [];
+    renderSearchResults();
+    setStatus(searchResults.length + ' result(s)');
+  } catch (e) {
+    setStatus('Search error: ' + e.message, 'error');
+    debugLog(e.message, 'search-error');
   }
 }
-function extractSearchResults(data){
-  if(Array.isArray(data?.data)) return data.data;
-  if(Array.isArray(data?.results)) return data.results;
-  if(Array.isArray(data)) return data;
-  return [];
-}
-function renderSearch(data){
-  const results = extractSearchResults(data);
-  els.searchInfo.textContent = `${results.length} result(s)`;
-  results.forEach(item=>{
-    const li=document.createElement('li');
-    const title = item.title || item.title_english || item.slug || 'Untitled';
+
+function renderSearchResults() {
+  els.resultsList.innerHTML = '';
+  searchResults.forEach(item => {
+    const li = document.createElement('li');
+    li.className = 'item';
     li.innerHTML = `
-      <strong>${title}</strong>
-      <span class="small">
-        <span class="badge">ID</span>${item.id ?? 'n/a'}
-        <span class="badge">SESSION</span>${item.session || 'n/a'}
-      </span>
-      ${item.type ? `<span class="small"><span class="badge">Type</span>${item.type}</span>`:''}
-      ${item.episodes ? `<span class="small"><span class="badge">Episodes</span>${item.episodes}</span>`:''}
+      <div>${item.title || 'Untitled'}</div>
+      <div class="small">${(item.type || '')} ${(item.year || '')}</div>
     `;
-    li.addEventListener('click', ()=>{
-      document.querySelectorAll('#results li').forEach(n=>n.classList.remove('active'));
+    li.addEventListener('click', () => {
+      document.querySelectorAll('#resultsList .item').forEach(n => n.classList.remove('active'));
       li.classList.add('active');
-      currentAnime=item;
-      currentEpisode=null;
-      els.streamLinks.innerHTML='';
-      els.streamInfo.textContent='';
-      loadEpisodes(item.session || item.id);
+      selectAnime(item);
     });
-    els.results.appendChild(li);
+    els.resultsList.appendChild(li);
   });
 }
-async function loadEpisodes(sessionOrId,{refresh=false}={}){
-  els.episodes.innerHTML='';
-  els.episodesInfo.textContent='Loading episodes...';
-  els.refreshEpisodesBtn.style.display='inline-block';
-  els.refreshEpisodesBtn.disabled=true;
-  lastEpisodesSession=sessionOrId;
+
+/* Assume item has session or slug usable as id for episodes */
+async function selectAnime(item) {
+  selectedAnime = item;
+  episodes = [];
+  currentEpisode = null;
+  lastMirrorData = null;
+  clearPlayerUI();
+  setStatus('Loading episodes...' + spinnerHtml());
+
   try {
-    const url = `${apiBase}/api/episodes?id=${encodeURIComponent(sessionOrId)}${refresh?'&refresh=1':''}`;
-    const data = await fetchJSON(url);
-    renderEpisodes(data);
-  } catch(e){
-    els.episodesInfo.innerHTML=`<span class="error">Failed: ${e.message}</span>`;
-  } finally {
-    els.refreshEpisodesBtn.disabled=false;
+    // episodes endpoint: /api/episodes?id=<animeSession>
+    const epRes = await fetch('/api/episodes?id=' + encodeURIComponent(item.session || item.id || item.slug));
+    if (!epRes.ok) throw new Error('Episodes fetch failed ' + epRes.status);
+    const epData = await epRes.json();
+    episodes = epData?.episodes || epData?.data || [];
+    renderEpisodes();
+    setStatus('Episodes loaded: ' + episodes.length);
+  } catch (e) {
+    setStatus('Episodes error: ' + e.message, 'error');
+    debugLog(e.message, 'episodes-error');
   }
 }
-function renderEpisodes(data){
-  const episodes = Array.isArray(data?.episodes) ? data.episodes :
-    (data?.data?.episodes || data?.data || []);
-  const total = data.total ?? episodes.length;
-  const lastPage = data.last_page ?? '?';
-  const cached = data.cached ? ' (cached)' : '';
-  els.episodesInfo.textContent = `${total} episode(s) across ${lastPage} page(s)${cached}`;
-  els.selectedAnime.innerHTML = currentAnime
-    ? `<strong>${currentAnime.title || currentAnime.title_english || 'Selected Anime'}</strong><br>
-       <span class="small">
-         Session: <code>${data.session || currentAnime.session || 'n/a'}</code>
-         ${currentAnime.id ? ` | Numeric: <code>${currentAnime.id}</code>`:''}
-       </span>`
-    : `<span class="small">Session: ${data.session}</span>`;
 
-  episodes.forEach(ep=>{
-    const epNum = ep.episode ?? ep.episode_number ?? ep.number ?? '?';
-    const epSession = ep.session || '';
-    const epId = ep.id || ep.episode_id || '';
-    const created = ep.created_at ? `<span class="small">${new Date(ep.created_at).toLocaleString()}</span>`:'';
-    const li=document.createElement('li');
-    li.innerHTML = `
-      <strong>Episode ${epNum}</strong>
-      ${created}
-      <span class="small">
-        <span class="badge">ID</span>${epId || 'n/a'}
-        <span class="badge">SESSION</span>${epSession || 'n/a'}
-      </span>
-    `;
-    li.addEventListener('click', ()=>{
-      document.querySelectorAll('#episodes li').forEach(n=>n.classList.remove('active'));
+function renderEpisodes() {
+  els.episodesList.innerHTML = '';
+  episodes.forEach(ep => {
+    const li = document.createElement('li');
+    li.className = 'item';
+    li.innerHTML = formatEpisodeLi(ep);
+    li.addEventListener('click', () => {
+      document.querySelectorAll('#episodesList .item').forEach(n => n.classList.remove('active'));
       li.classList.add('active');
-      currentEpisode=ep;
-      if(!epId || !epSession){
-        els.streamInfo.innerHTML='<span class="error">Episode missing id or session; cannot load links.</span>';
-        els.streamLinks.innerHTML='';
-        return;
+      loadEpisode(ep);
+    });
+    els.episodesList.appendChild(li);
+  });
+}
+
+/* ---------- Player Flow using new /api/play/:slug/:epSession ---------- */
+function clearPlayerUI() {
+  els.mirrorList.innerHTML = '';
+  resetSelects();
+  setPlayerStatus('');
+  subtitleTracks = [];
+  renderSubtitleTracks();
+  updateSubtitleSelect();
+}
+
+function resetSelects() {
+  els.resolutionSelect.innerHTML = '<option value="">Auto Resolution</option>';
+  els.audioSelect.innerHTML = '<option value="">Auto Audio</option>';
+  els.subtitleSelect.innerHTML = '<option value="">Subtitles (None)</option>';
+  appliedResolution = '';
+  appliedAudio = '';
+  activeSubtitleUri = '';
+  activeSubtitleLabel = '';
+}
+
+async function loadEpisode(ep) {
+  currentEpisode = ep;
+  clearPlayerUI();
+  els.applyBtn.disabled = true;
+  els.refreshMirrorsBtn.disabled = true;
+  els.reloadPlaylistBtn.disabled = true;
+  setPlayerStatus('Fetching mirrors...' + spinnerHtml());
+  debugLog({ slug: (selectedAnime?.slug || selectedAnime?.session), epSession: ep.session }, 'play-params');
+
+  try {
+    const slug = (selectedAnime?.slug || selectedAnime?.session || selectedAnime?.id || '').trim();
+    if (!slug || !ep.session) throw new Error('Missing slug or episode session');
+
+    // list only to gather mirrors
+    const url = `/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(ep.session)}?listOnly=true`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Mirror fetch failed');
+
+    lastMirrorData = data;
+    populateFilterSelectors(data.buttons || []);
+    renderMirrors(data.buttons || []);
+    els.applyBtn.disabled = false;
+    els.refreshMirrorsBtn.disabled = false;
+
+    // Immediately fetch a playlist with current (auto) filters to start playback
+    await resolveAndPlayCurrentFilters(false);
+
+  } catch (e) {
+    setPlayerStatus('Mirror error: ' + e.message, 'error');
+    debugLog(e.message, 'mirror-error');
+  }
+}
+
+function populateFilterSelectors(buttons) {
+  const resSet = [...new Set(buttons.map(b => b.resolution).filter(Boolean))].sort((a,b)=>parseInt(b)-parseInt(a));
+  const audioSet = [...new Set(buttons.map(b => b.audio).filter(Boolean))];
+  resSet.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r;
+    opt.textContent = r + 'p';
+    els.resolutionSelect.appendChild(opt);
+  });
+  audioSet.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a;
+    opt.textContent = a;
+    els.audioSelect.appendChild(opt);
+  });
+}
+
+function renderMirrors(buttons) {
+  els.mirrorList.innerHTML = '';
+  buttons.forEach((b,i)=>{
+    const div = document.createElement('div');
+    div.className = 'mirror';
+    div.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.65rem;font-weight:600;letter-spacing:.5px;">
+          ${b.resolution || '?'}p
+          <span class="pill">${b.audio || '?'}</span>
+          ${b.av1 === '1' ? '<span class="pill" style="background:#4338ca;">AV1</span>' : ''}
+        </div>
+        <div class="small" style="opacity:.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${b.src.replace(/^https?:\\/\\//,'')}
+        </div>
+      </div>
+      <div class="inline-group" style="flex-shrink:0;">
+        <button data-idx="${i}" class="resolveBtn">Play</button>
+      </div>
+    `;
+    div.querySelector('.resolveBtn').addEventListener('click', async () => {
+      // Force selection by setting filters to that mirror's attributes then resolving
+      els.resolutionSelect.value = b.resolution || '';
+      els.audioSelect.value = b.audio || '';
+      await resolveAndPlayCurrentFilters(true);
+    });
+    els.mirrorList.appendChild(div);
+  });
+}
+
+async function resolveAndPlayCurrentFilters(userInitiated) {
+  if (!selectedAnime || !currentEpisode) return;
+  const slug = (selectedAnime?.slug || selectedAnime?.session || selectedAnime?.id || '').trim();
+  const epSession = currentEpisode.session;
+  const resolution = els.resolutionSelect.value;
+  const audio = els.audioSelect.value;
+
+  setPlayerStatus('Resolving playlist...' + spinnerHtml());
+  els.reloadPlaylistBtn.disabled = true;
+  try {
+    const params = new URLSearchParams();
+    if (resolution) params.set('resolution', resolution);
+    if (audio) params.set('audio', audio);
+    const url = `/api/play/${encodeURIComponent(slug)}/${encodeURIComponent(epSession)}?${params.toString()}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    debugLog(data, 'playlist-response');
+    if (!res.ok || !data.playlist) throw new Error(data.error || 'No playlist returned');
+    lastPlaylistUrl = data.playlist;
+    appliedResolution = resolution;
+    appliedAudio = audio;
+    els.reloadPlaylistBtn.disabled = false;
+
+    await playHls(data.playlist);
+    setPlayerStatus(
+      `Playing EP ${currentEpisode.episode} ${appliedResolution || 'AUTO'} ${appliedAudio || ''}`.trim(),
+      ''
+    );
+
+    // Parse subtitles if any present in master playlist
+    await fetchAndExtractSubtitles(data.playlist);
+
+  } catch (e) {
+    setPlayerStatus('Playlist error: ' + e.message, 'error');
+    debugLog(e.message, 'playlist-error');
+  }
+}
+
+/* ---------- HLS Playback & Subtitles ---------- */
+async function playHls(url) {
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+  // Clear existing <track>
+  [...els.video.querySelectorAll('track')].forEach(t => t.remove());
+  if (window.Hls && Hls.isSupported()) {
+    hlsInstance = new Hls({
+      enableWorker:true,
+      lowLatencyMode:true
+    });
+    hlsInstance.loadSource(url);
+    hlsInstance.attachMedia(els.video);
+    hlsInstance.on(Hls.Events.ERROR, (evt,data)=>{
+      debugLog({evt,data}, 'hls-error');
+      if (data?.fatal) {
+        setPlayerStatus('Fatal HLS error', 'error');
       }
-      loadStream(epId, epSession);
     });
-    els.episodes.appendChild(li);
-  });
-
-  if(!episodes.length){
-    els.episodesInfo.innerHTML += `<div class="error">No episodes returned.</div>`;
+  } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
+    els.video.src = url;
+  } else {
+    setPlayerStatus('HLS not supported in this browser', 'error');
   }
 }
-async function loadStream(episodeId, episodeSession){
-  els.streamLinks.innerHTML='';
-  els.streamInfo.textContent='Loading stream links...';
-  const url = `${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}&session=${encodeURIComponent(episodeSession)}`;
-  els.lastStreamURL.textContent = url;
+
+/* Fetch playlist text and parse EXT-X-MEDIA for subtitles */
+async function fetchAndExtractSubtitles(masterUrl) {
+  subtitleTracks = [];
+  activeSubtitleUri = '';
+  activeSubtitleLabel = '';
+  renderSubtitleTracks();
+  updateSubtitleSelect();
+
   try {
-    const data = await fetchJSON(url);
-    const links = Array.isArray(data?.data?.links) ? data.data.links
-                : Array.isArray(data?.links) ? data.links
-                : (Array.isArray(data) ? data : []);
-    if(!Array.isArray(links)){
-      els.streamInfo.textContent='Unexpected response shape';
-      els.streamLinks.textContent=JSON.stringify(data,null,2);
-      return;
-    }
-    els.streamInfo.textContent=`${links.length} link(s)`;
-    links.forEach(l=>{
-      const a=document.createElement('a');
-      a.href = l.url || l.link || l.playlist || '#';
-      a.target='_blank'; a.rel='noopener';
-      const labelRes = l.resolution || l.quality || '';
-      const labelHost = l.server || l.cdn || l.host || '';
-      a.textContent = `${labelRes}${labelRes && labelHost ? ' - ' : ''}${labelHost} ${a.href}`;
-      els.streamLinks.appendChild(a);
-      els.streamLinks.appendChild(document.createElement('br'));
-    });
-  } catch(e){
-    els.streamInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
+    const res = await fetch(masterUrl);
+    if (!res.ok) throw new Error('Cannot fetch master m3u8');
+    const text = await res.text();
+    parseSubtitlesFromM3U8(text, masterUrl);
+    updateSubtitleSelect();
+    renderSubtitleTracks();
+  } catch (e) {
+    debugLog(e.message, 'subtitle-parse-error');
   }
 }
 
-// Events
+function parseSubtitlesFromM3U8(text, baseUrl) {
+  // Base path for relative subtitle URIs
+  const base = baseUrl.split('/').slice(0,-1).join('/');
+  const lines = text.split(/\\r?\\n/);
+  for (let i=0;i<lines.length;i++) {
+    const line = lines[i];
+    if (line.startsWith('#EXT-X-MEDIA') && /TYPE=SUBTITLES/.test(line)) {
+      const uriMatch = line.match(/URI="([^"]+)"/);
+      const langMatch = line.match(/LANGUAGE="([^"]+)"/);
+      const nameMatch = line.match(/NAME="([^"]+)"/);
+      if (uriMatch) {
+        let uri = uriMatch[1];
+        if (!/^https?:/i.test(uri)) {
+          uri = base + '/' + uri.replace(/^\\.\\//,'');
+        }
+        subtitleTracks.push({
+          uri,
+            lang: langMatch ? langMatch[1] : '',
+          label: nameMatch ? nameMatch[1] : (langMatch ? langMatch[1] : 'Subtitle'),
+          raw: line
+        });
+      }
+    }
+  }
+}
+
+function updateSubtitleSelect() {
+  const sel = els.subtitleSelect;
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">Subtitles (None)</option>';
+  subtitleTracks.forEach((t,idx)=>{
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = t.label || t.lang || ('Track '+(idx+1));
+    sel.appendChild(opt);
+  });
+  if (currentVal && parseInt(currentVal,10) < subtitleTracks.length) {
+    sel.value = currentVal;
+  }
+}
+
+function renderSubtitleTracks() {
+  els.subtitleTracks.innerHTML = '';
+  if (!subtitleTracks.length) {
+    els.subtitleTracks.innerHTML = '<div class="small" style="opacity:.5;">No subtitle tracks found in master</div>';
+    return;
+  }
+  subtitleTracks.forEach((t,i)=>{
+    const div = document.createElement('div');
+    div.className = 'subtitle-track' + (t.uri === activeSubtitleUri ? ' active':'');
+    div.innerHTML = `
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;">${t.label || t.lang || 'Track '+(i+1)}</div>
+        <div class="small" style="opacity:.55;">${t.lang || ''}</div>
+      </div>
+      <button data-idx="${i}" style="background:#374151;">Load</button>
+    `;
+    div.querySelector('button').addEventListener('click', ()=>applySubtitleTrack(i));
+    els.subtitleTracks.appendChild(div);
+  });
+}
+
+/* Load selected subtitle track as a WebVTT <track>. If it's HLS again, attempt to fetch & merge lines */
+async function applySubtitleTrack(index) {
+  if (index === '' || index == null) {
+    activeSubtitleUri = '';
+    activeSubtitleLabel = '';
+    [...els.video.querySelectorAll('track')].forEach(t => t.remove());
+    renderSubtitleTracks();
+    return;
+  }
+  const track = subtitleTracks[index];
+  if (!track) return;
+  activeSubtitleUri = track.uri;
+  activeSubtitleLabel = track.label;
+
+  try {
+    const res = await fetch(track.uri);
+    if (!res.ok) throw new Error('Subtitle fetch failed');
+    const text = await res.text();
+
+    let finalVtt = '';
+    if (/\\.vtt($|\\?)/i.test(track.uri) || text.startsWith('WEBVTT')) {
+      finalVtt = text.startsWith('WEBVTT') ? text : 'WEBVTT\\n\\n' + text;
+    } else if (/\\.m3u8($|\\?)/i.test(track.uri) || text.includes('#EXTM3U')) {
+      // If the subtitle track is itself an HLS playlist, we can attempt to join segments (simple approach)
+      finalVtt = 'WEBVTT\\n\\n';
+      const base = track.uri.split('/').slice(0,-1).join('/');
+      const lines = text.split(/\\r?\\n/);
+      const segmentUris = lines.filter(l => l && !l.startsWith('#'));
+      for (const seg of segmentUris) {
+        let segUrl = seg;
+        if (!/^https?:/i.test(segUrl)) segUrl = base + '/' + seg.replace(/^\\.\\//,'');
+        try {
+          const segResp = await fetch(segUrl);
+          if (segResp.ok) {
+            const segText = await segResp.text();
+            // naive append
+            finalVtt += segText.replace(/^WEBVTT.*?\\n+/i,'') + '\\n';
+          }
+        } catch {}
+      }
+    } else {
+      // Attempt naive SRT -> VTT conversion (very basic)
+      if (text.match(/\\d+\\s+\\d{2}:\\d{2}:\\d{2}/)) {
+        finalVtt = 'WEBVTT\\n\\n' + text
+          .replace(/,(\\d{3})/g,'.$1')  // convert comma milliseconds
+          .replace(/^(\\d+)\\s*$/gm,''); // remove index lines
+      } else {
+        finalVtt = 'WEBVTT\\n\\n' + text;
+      }
+    }
+
+    // Remove old
+    [...els.video.querySelectorAll('track')].forEach(t => t.remove());
+    const blob = new Blob([finalVtt], { type:'text/vtt' });
+    const url = URL.createObjectURL(blob);
+    const trackEl = document.createElement('track');
+    trackEl.kind = 'subtitles';
+    trackEl.label = track.label || track.lang || 'Sub';
+    trackEl.srclang = track.lang || 'und';
+    trackEl.default = true;
+    trackEl.src = url;
+    els.video.appendChild(trackEl);
+
+    renderSubtitleTracks();
+    setPlayerStatus('Subtitle loaded: ' + (track.label || track.lang || ''), '');
+    debugLog(track.uri, 'subtitle-loaded');
+  } catch (e) {
+    setPlayerStatus('Subtitle error: ' + e.message, 'error');
+    debugLog(e.message, 'subtitle-error');
+  }
+}
+
+/* ---------- Event Handlers ---------- */
 els.searchBtn.addEventListener('click', doSearch);
-els.searchInput.addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
-els.refreshEpisodesBtn.addEventListener('click', ()=>{
-  if(lastEpisodesSession) loadEpisodes(lastEpisodesSession,{refresh:true});
+els.searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+els.applyBtn.addEventListener('click', () => resolveAndPlayCurrentFilters(true));
+els.refreshMirrorsBtn.addEventListener('click', () => {
+  if (currentEpisode) loadEpisode(currentEpisode);
 });
+els.reloadPlaylistBtn.addEventListener('click', () => {
+  if (lastPlaylistUrl) playHls(lastPlaylistUrl);
+});
+
+els.clearDebugBtn.addEventListener('click', clearDebug);
+
+els.toggleAutoPlayBtn.addEventListener('click', ()=>{
+  autoplay = !autoplay;
+  els.toggleAutoPlayBtn.textContent = 'Autoplay: ' + (autoplay ? 'On':'Off');
+});
+
+/* Autoplay next episode when ended */
+els.video.addEventListener('ended', () => {
+  if (!autoplay || !currentEpisode) return;
+  const idx = episodes.findIndex(e => e.session === currentEpisode.session);
+  if (idx >= 0 && idx < episodes.length - 1) {
+    const next = episodes[idx + 1];
+    // highlight
+    const lis = els.episodesList.querySelectorAll('.item');
+    if (lis[idx+1]) {
+      lis.forEach(li => li.classList.remove('active'));
+      lis[idx+1].classList.add('active');
+    }
+    loadEpisode(next);
+  }
+});
+
+/* Subtitle select change */
+els.subtitleSelect.addEventListener('change', (e)=>{
+  const val = e.target.value;
+  if (val === '') {
+    applySubtitleTrack('');
+  } else {
+    applySubtitleTrack(parseInt(val,10));
+  }
+});
+
+/* ---------- Init ---------- */
+setStatus('Ready. Enter a search query.');
+debugLog('App initialized', 'init');
+
 </script>
 </body>
 </html>

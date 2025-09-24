@@ -39,6 +39,33 @@ function sendUpstreamError(res, err, fallback) {
   return res.status(500).json({ error: fallback });
 }
 
+const episodesCache = new Map();
+
+async function fetchAllEpisodes(session) {
+  const firstParams = new URLSearchParams({
+    m: 'release',
+    id: session,
+    sort: 'episode_asc',
+    page: '1'
+  });
+  const { data: first } = await upstream.get('?' + firstParams.toString());
+  const episodes = Array.isArray(first?.data) ? [...first.data] : [];
+  const lastPage = first?.last_page || 1;
+
+  for (let p = 2; p <= lastPage; p++) {
+    const params = new URLSearchParams({
+      m: 'release',
+      id: session,
+      sort: 'episode_asc',
+      page: String(p)
+    });
+    const { data } = await upstream.get('?' + params.toString());
+    if (Array.isArray(data?.data)) episodes.push(...data.data);
+  }
+
+  return { episodes, last_page: lastPage };
+}
+
 app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   const page = req.query.page;
@@ -54,18 +81,49 @@ app.get('/api/search', async (req, res) => {
 });
 
 app.get('/api/episodes', async (req, res) => {
-  let token = (req.query.id || '').trim();
-  if (!token) return res.status(400).json({ error: 'Missing anime id' });
+  let token = (req.query.id || req.query.session || '').trim();
+  const refresh = req.query.refresh === '1';
+
+  if (!token) {
+    return res.status(400).json({ error: 'Missing anime id or session (?id= or ?session=)' });
+  }
 
   try {
     if (/^[0-9]+$/.test(token)) {
       token = await resolveSessionFromNumeric(token);
     }
-    const params = new URLSearchParams({ m: 'release', id: token, sort: 'episode_asc' });
-    const { data } = await upstream.get('?' + params.toString());
-    res.json(data);
+
+    if (!refresh && episodesCache.has(token)) {
+      const cached = episodesCache.get(token);
+      return res.json({
+        session: token,
+        total: cached.episodes.length,
+        last_page: cached.last_page,
+        episodes: cached.episodes,
+        cached: true
+      });
+    }
+
+    const { episodes, last_page } = await fetchAllEpisodes(token);
+
+    const payload = {
+      session: token,
+      total: episodes.length,
+      last_page,
+      episodes
+    };
+    episodesCache.set(token, {
+      episodes,
+      last_page,
+      cachedAt: Date.now()
+    });
+
+    res.json(payload);
   } catch (err) {
-    res.status(404).json({ error: 'Could not retrieve episodes', detail: err.message });
+    if (err?.response?.status === 404) {
+      return res.status(404).json({ error: 'Anime not found', detail: err.message });
+    }
+    res.status(500).json({ error: 'Could not retrieve episodes', detail: err.message });
   }
 });
 

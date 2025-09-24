@@ -1,15 +1,14 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
-import axios from 'axios';
 import cors from 'cors';
 import { resolveSessionFromNumeric } from './resolver.js';
+import { upstream } from './upstream.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3001;
-const API_BASE = process.env.ANIME_API_BASE || 'https://animepahe.si/api';
 
 const app = express();
 
@@ -19,12 +18,6 @@ app.use(cors({
 app.use(express.json());
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
-
-const upstream = axios.create({
-  baseURL: API_BASE,
-  timeout: 10000,
-  headers: { 'User-Agent': 'animepahe-proxy/1.0 (+https://github.com/staticsenju/animepahe-web)' }
-});
 
 function sendUpstreamError(res, err, fallback) {
   if (err?.response) {
@@ -39,6 +32,7 @@ function sendUpstreamError(res, err, fallback) {
   return res.status(500).json({ error: fallback });
 }
 
+// Simple in-memory full episodes cache
 const episodesCache = new Map();
 
 async function fetchAllEpisodes(session) {
@@ -80,6 +74,12 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+/**
+ * Aggregated episodes endpoint.
+ * Prefer passing the session token from /api/search results.
+ * Accepts numeric id for convenience, but will resolve it by performing a search.
+ * GET /api/episodes?id=<sessionOrNumeric>[&refresh=1]
+ */
 app.get('/api/episodes', async (req, res) => {
   let token = (req.query.id || req.query.session || '').trim();
   const refresh = req.query.refresh === '1';
@@ -89,8 +89,23 @@ app.get('/api/episodes', async (req, res) => {
   }
 
   try {
-    if (/^[0-9]+$/.test(token)) {
-      token = await resolveSessionFromNumeric(token);
+    const isNumeric = /^[0-9]+$/.test(token);
+    if (isNumeric) {
+      try {
+        token = await resolveSessionFromNumeric(token);
+      } catch (resolveErr) {
+        const upstreamStatus = resolveErr?.response?.status;
+        if (upstreamStatus === 403) {
+          return res.status(403).json({
+            error: 'Upstream blocked numeric id lookup (403). Use session from /api/search instead.',
+            detail: resolveErr.message
+          });
+        }
+        return res.status(400).json({
+            error: 'Unable to resolve numeric id to session. Use /api/search to obtain the session token.',
+            detail: resolveErr.message
+        });
+      }
     }
 
     if (!refresh && episodesCache.has(token)) {
@@ -105,25 +120,23 @@ app.get('/api/episodes', async (req, res) => {
     }
 
     const { episodes, last_page } = await fetchAllEpisodes(token);
+    episodesCache.set(token, { episodes, last_page, cachedAt: Date.now() });
 
-    const payload = {
+    res.json({
       session: token,
       total: episodes.length,
       last_page,
-      episodes
-    };
-    episodesCache.set(token, {
       episodes,
-      last_page,
-      cachedAt: Date.now()
+      cached: false
     });
-
-    res.json(payload);
   } catch (err) {
-    if (err?.response?.status === 404) {
-      return res.status(404).json({ error: 'Anime not found', detail: err.message });
+    if (err?.response?.status === 403) {
+      return res.status(403).json({
+        error: 'Forbidden by upstream while fetching episodes (possible anti-bot). Try again or switch session.',
+        upstreamStatus: 403
+      });
     }
-    res.status(500).json({ error: 'Could not retrieve episodes', detail: err.message });
+    sendUpstreamError(res, err, 'Could not retrieve episodes');
   }
 });
 

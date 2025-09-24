@@ -253,97 +253,96 @@ app.get('/api/stream', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch stream links' });
   }
 });
-
-const HLS_ALLOWED_HOSTS = (process.env.HLS_ALLOWED_HOSTS || 'kwik.si,uwucdn.top,vault-01.uwucdn.top').split(',').map(h => h.trim().toLowerCase());
-
 app.get('/api/hls', async (req, res) => {
-  const target = req.query.u;
-  const cookieRaw = req.query.c || ''; 
-  if (!target) return res.status(400).json({ error: 'Missing u parameter' });
+  const targetEnc = req.query.u;
+  const cookieRaw = req.query.c || '';
+  const range = req.headers.range || '';
 
-  let decoded;
+  if (!targetEnc) {
+    return res.status(400).json({ error: 'Missing u parameter' });
+  }
+
+  let target;
   try {
-    decoded = decodeURIComponent(target);
+    target = decodeURIComponent(targetEnc);
   } catch {
     return res.status(400).json({ error: 'Invalid encoded URL' });
   }
 
-  try {
-    const u = new URL(decoded);
-    const hostOk = HLS_ALLOWED_HOSTS.some(h => u.hostname === h || u.hostname.endsWith('.' + h));
-    if (!hostOk) {
-      return res.status(403).json({ error: 'Host not allowed for proxy', host: u.hostname });
-    }
-  } catch {
-    return res.status(400).json({ error: 'Invalid URL' });
+  // Only allow http/https (still a minimal safeguard)
+  if (!/^https?:\/\//i.test(target)) {
+    return res.status(400).json({ error: 'Only absolute http/https URLs allowed' });
   }
 
-  const isManifest = /\.m3u8(\?|$)/i.test(decoded);
+  const isManifest = /\.m3u8(\?|$)/i.test(target);
+  const base = target.split('/').slice(0, -1).join('/');
 
   try {
-    const upstream = await axios.get(decoded, {
+    const upstream = await axios.get(target, {
       responseType: isManifest ? 'text' : 'arraybuffer',
-      timeout: 20000,
+      timeout: 25000,
       headers: {
         'User-Agent': process.env.USER_AGENT ||
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         'Referer': 'https://kwik.si/',
+        'Origin': 'https://kwik.si',
         'Accept': isManifest
           ? 'application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.8'
           : '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        ...(cookieRaw ? { 'Cookie': cookieRaw } : {})
+        ...(cookieRaw ? { 'Cookie': cookieRaw } : {}),
+        ...(range ? { 'Range': range } : {})
       },
       validateStatus: s => s >= 200 && s < 400,
-      maxRedirects: 3
+      maxRedirects: 5
     });
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Origin, Range, Accept, User-Agent');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Content-Length, Accept-Ranges');
+    if (upstream.headers['accept-ranges']) {
+      res.setHeader('Accept-Ranges', upstream.headers['accept-ranges']);
+    }
 
     if (!isManifest) {
       const ct = upstream.headers['content-type'] || 'application/octet-stream';
       res.setHeader('Content-Type', ct);
-      if (upstream.headers['accept-ranges']) {
-        res.setHeader('Accept-Ranges', upstream.headers['accept-ranges']);
-      }
+      if (upstream.status === 206) res.status(206);
       return res.send(upstream.data);
     }
 
-    const originalText = upstream.data;
-    const base = decoded.split('/').slice(0, -1).join('/');
-    const rewritten = rewriteManifest(originalText, base, cookieRaw);
-
+    const rewritten = rewriteManifest(upstream.data, base, cookieRaw);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     return res.send(rewritten);
-
   } catch (e) {
-    return res.status(502).json({
+    const status = e?.response?.status || 502;
+    return res.status(status).json({
       error: 'Upstream fetch failed',
+      status,
       details: e.message
     });
   }
 });
 
-function rewriteManifest(manifestText, base, cookieRaw) {
-  const makeProxy = (abs) =>
-    '/api/hls?u=' + encodeURIComponent(abs) + (cookieRaw ? '&c=' + encodeURIComponent(cookieRaw) : '');
-
-  const lines = manifestText.split(/\r?\n/);
+function rewriteManifest(text, base, cookieRaw) {
+  const lines = text.split(/\r?\n/);
   return lines.map(line => {
     if (!line || line.startsWith('#')) {
       if (/^#EXT-X-KEY/i.test(line)) {
-        line = line.replace(/URI="([^"]+)"/i, (m, g1) => {
+        return line.replace(/URI="([^"]+)"/i, (m, g1) => {
           const abs = absolutize(g1, base);
-            return 'URI="' + makeProxy(abs) + '"';
+          return 'URI="' + proxyLink(abs, cookieRaw) + '"';
         });
       }
       return line;
     }
     const abs = absolutize(line.trim(), base);
-    return makeProxy(abs);
+    return proxyLink(abs, cookieRaw);
   }).join('\n');
+}
+
+function proxyLink(abs, cookieRaw) {
+  return '/api/hls?u=' + encodeURIComponent(abs) + (cookieRaw ? '&c=' + encodeURIComponent(cookieRaw) : '');
 }
 
 function absolutize(ref, base) {

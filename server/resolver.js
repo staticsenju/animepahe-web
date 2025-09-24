@@ -1,28 +1,38 @@
-import axios from 'axios';
+// Improved resolver: numeric ID -> session using search with retry & shared upstream
+import { upstream } from './upstream.js';
 
 const idToSession = new Map();
 const sessionToTitle = new Map();
-const API_BASE = 'https://animepahe.si/api';
 
-async function searchRaw(q) {
-  const url = `${API_BASE}?m=search&q=${encodeURIComponent(q)}`;
-  const { data } = await axios.get(url, {
-    headers: { 'User-Agent': 'animepahe-web/1.0' }
-  });
-  return data?.data || data?.results || [];
+async function searchRaw(q, attempt = 1) {
+  const url = `?m=search&q=${encodeURIComponent(q)}`;
+  try {
+    const { data } = await upstream.get(url);
+    return data?.data || data?.results || [];
+  } catch (err) {
+    const status = err?.response?.status;
+    // Retry a couple of times on 403/429 (potential transient WAF or rate limiting)
+    if ((status === 403 || status === 429) && attempt < 3) {
+      const delay = 250 * attempt;
+      await new Promise(r => setTimeout(r, delay));
+      return searchRaw(q, attempt + 1);
+    }
+    throw err;
+  }
 }
 
 export async function resolveSessionFromNumeric(numericId) {
-  if (idToSession.has(numericId)) return idToSession.get(numericId);
+  const key = String(numericId);
+  if (idToSession.has(key)) return idToSession.get(key);
 
-  const results = await searchRaw(String(numericId));
-  let match = results.find(r => String(r.id) === String(numericId));
+  const results = await searchRaw(key);
+  const match = results.find(r => String(r.id) === key);
 
   if (!match) {
-    throw new Error('Unable to resolve numeric id to session via search.');
+    throw new Error('Could not resolve numeric id to session (search returned no matching entry).');
   }
 
-  idToSession.set(String(numericId), match.session);
+  idToSession.set(key, match.session);
   sessionToTitle.set(match.session, match.title);
   return match.session;
 }

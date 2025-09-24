@@ -4,9 +4,7 @@ import * as cheerio from 'cheerio';
 import vm from 'vm';
 
 const DEFAULT_HOST = process.env.ANIMEPAHE_HOST || 'https://animepahe.si';
-const UA = process.env.USER_AGENT ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
-
+const UA = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 const DEBUG = !!process.env.DEBUG_PLAYLIST_EXTRACTION;
 
 export function generateCookie() {
@@ -43,7 +41,8 @@ async function fetchHtmlAbsolute(url, cookie, referer) {
     maxRedirects: 5,
     validateStatus: s => s >= 200 && s < 400
   });
-  return { html: resp.data, finalUrl: resp.request?.res?.responseUrl || url };
+  const setCookies = resp.headers['set-cookie'] || [];
+  return { html: resp.data, finalUrl: resp.request?.res?.responseUrl || url, setCookies };
 }
 
 export async function fetchPlayPage(slug, episodeSession, cookie) {
@@ -72,7 +71,6 @@ export function extractButtons(html) {
 export function chooseButton(buttons, { audio, resolution }) {
   if (!buttons || !buttons.length) return null;
   let candidates = buttons.slice();
-
   if (audio) {
     const audFiltered = candidates.filter(b => b.audio === audio);
     if (audFiltered.length) candidates = audFiltered;
@@ -81,109 +79,83 @@ export function chooseButton(buttons, { audio, resolution }) {
     const resFiltered = candidates.filter(b => b.resolution === resolution);
     if (resFiltered.length) candidates = resFiltered;
   }
-
   const nonAv1 = candidates.filter(b => b.av1 === '0');
   if (nonAv1.length) candidates = nonAv1;
-
-  candidates.sort((a, b) =>
-    (parseInt(b.resolution || '0', 10) - parseInt(a.resolution || '0', 10))
-  );
-
+  candidates.sort((a, b) => (parseInt(b.resolution || '0', 10) - parseInt(a.resolution || '0', 10)));
   return candidates[0] || null;
 }
 
 export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
   if (!mirrorUrl) throw new Error('mirrorUrl is required');
   const norm = normalizeUrl(mirrorUrl);
-
-  const { html: initialHtml } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
-
+  const origin = new URL(norm).origin;
+  const { html: initialHtml, setCookies: sc1 } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
   const redirectedHtml = await followMetaRefreshIfAny(initialHtml, cookie, norm);
-
   const html = redirectedHtml || initialHtml;
-
   const scripts = extractAllScripts(html);
-
-  const chainResult = deobfuscateByEvalChain(scripts);
-
+  const chainResult = deobfuscateByEvalChain(scripts, origin);
   const codeCorpus = [
     ...scripts,
     ...chainResult.capturedEvalStrings,
     chainResult.combinedEvalOutput
   ].join('\n\n/* ---- */\n\n');
-  
-  const playlist = extractPlaylistFromCorpus(codeCorpus) ||
-                   extractPlaylistFromCorpus(html) ||
-                   scanBase64ForPlaylist(codeCorpus) ||
-                   scanBase64ForPlaylist(html);
-
-  if (!playlist) {
+  const primary = extractPlaylistFromCorpus(codeCorpus) ||
+                  extractPlaylistFromCorpus(html) ||
+                  scanBase64ForPlaylist(codeCorpus) ||
+                  scanBase64ForPlaylist(html);
+  const allCandidates = collectAllM3u8s(codeCorpus, html);
+  if (primary && !allCandidates.includes(primary)) allCandidates.unshift(primary);
+  const unique = [...new Set(allCandidates)];
+  const evaluated = await evaluateCandidates(unique.slice(0, 12));
+  const best = pickBestPlaylist(evaluated);
+  if (!best) {
     if (DEBUG) {
-      throw new Error(
-        'Playlist not found after heuristics. Debug payload: ' +
-        JSON.stringify({
-          evalStages: chainResult.stagesMeta.slice(0, 6),
-          evalCount: chainResult.capturedEvalStrings.length,
-          sampleCode: codeCorpus.slice(0, 600)
-        }, null, 2)
-      );
+      throw new Error('No viable video playlist. Candidates=' + JSON.stringify(evaluated, null, 2));
     }
-    throw new Error('Playlist source (.m3u8) not discovered in mirror scripts');
+    throw new Error('Playlist source (.m3u8) not discovered or all candidates are non-video');
   }
-
   return {
-    playlist,
+    playlist: best.url,
+    classification: best.kind,
+    candidatesTried: evaluated.map(e => ({ url: e.url, kind: e.kind })),
     debug: DEBUG ? {
       totalScripts: scripts.length,
       evalChainDepth: chainResult.stagesMeta.length,
-      evalCaptured: chainResult.capturedEvalStrings.length,
-      sampleEvalLeaf: chainResult.capturedEvalStrings.slice(-1)[0]?.slice(0, 400),
+      evalCaptured: chainResult.capturedEvalStrings.length
     } : undefined
   };
 }
 
-function deobfuscateByEvalChain(scriptBodies) {
+function deobfuscateByEvalChain(scriptBodies, originHref) {
   const capturedEvalStrings = [];
   const stagesMeta = [];
-  
-  const queue = scriptBodies
-    .filter(s => /eval\(/.test(s) || /source\s*=/.test(s))
-    .slice();
-
+  const queue = scriptBodies.filter(s => /eval\(/.test(s) || /source\s*=/.test(s)).slice();
   const seen = new Set();
-
   while (queue.length) {
     const original = queue.shift();
     if (!original || seen.has(original)) continue;
     seen.add(original);
-
     const stageLogs = [];
     const nestedCaptured = [];
-    const sandbox = makeSandbox(nestedCaptured, stageLogs);
+    const sandbox = makeSandbox(nestedCaptured, stageLogs, originHref);
     const prepared = original;
-
     let error = null;
     try {
       vm.runInNewContext(prepared, sandbox, { timeout: 3000 });
     } catch (e) {
       error = e;
     }
-
     stagesMeta.push({
       inputSnippet: original.slice(0, 140),
       logsSnippet: stageLogs.slice(0, 6).join('\n').slice(0, 300),
       nestedCount: nestedCaptured.length,
       error: error ? (error.message || String(error)) : null
     });
-
     for (const nested of nestedCaptured) {
       capturedEvalStrings.push(nested);
-      if (!seen.has(nested) && /eval\(/.test(nested)) {
-        queue.push(nested);
-      }
+      if (!seen.has(nested) && /eval\(/.test(nested)) queue.push(nested);
     }
   }
-
   return {
     capturedEvalStrings,
     stagesMeta,
@@ -191,7 +163,7 @@ function deobfuscateByEvalChain(scriptBodies) {
   };
 }
 
-function makeSandbox(nestedCaptured, stageLogs) {
+function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/') {
   const sandbox = {
     console: {
       log: (...args) => {
@@ -202,12 +174,12 @@ function makeSandbox(nestedCaptured, stageLogs) {
       try {
         if (typeof arg === 'string') {
           nestedCaptured.push(arg);
-            try {
-              return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
-            } catch (inner) {
-              stageLogs.push('[eval-exec-error] ' + inner.message);
-            }
-            return arg;
+          try {
+            return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
+          } catch (inner) {
+            stageLogs.push('[eval-exec-error] ' + inner.message);
+          }
+          return arg;
         }
         return arg;
       } catch (e) {
@@ -229,12 +201,13 @@ function makeSandbox(nestedCaptured, stageLogs) {
     atob: (b64) => Buffer.from(b64, 'base64').toString('utf8'),
     btoa: (str) => Buffer.from(str, 'utf8').toString('base64'),
     crypto: {},
-    location: { href: 'https://kwik.si/' },
+    location: { href: originHref },
     globalThis: {}
   };
   sandbox.globalThis = sandbox;
   return sandbox;
 }
+
 const PLAYLIST_REGEXES = [
   /source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
   /['"]([^'"]+\.m3u8[^'"]*)['"]\s*[,;)]/i,
@@ -266,8 +239,7 @@ function scanBase64ForPlaylist(text) {
                    decoded.match(/https?:\/\/[^\s'"]+\.m3u8[^\s'"]*/i)?.[0];
         if (pl) return sanitizeUrl(pl);
       }
-    } catch {
-    }
+    } catch {}
   }
   return null;
 }
@@ -311,3 +283,59 @@ function normalizeUrl(u) {
   }
   return u;
 }
+
+function collectAllM3u8s(...texts) {
+  const out = [];
+  for (const t of texts) {
+    if (!t) continue;
+    const matches = t.match(/https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*/gi);
+    if (matches) out.push(...matches.map(sanitizeUrl));
+  }
+  return out;
+}
+
+async function evaluateCandidates(urls) {
+  const results = [];
+  for (const url of urls) {
+    try {
+      const { data } = await axios.get(url, {
+        headers: {
+          'User-Agent': UA,
+          'Referer': new URL(url).origin + '/',
+          'Accept': 'application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.8'
+        },
+        timeout: 12000,
+        responseType: 'text',
+        validateStatus: s => s >= 200 && s < 400
+      });
+      const kind = classifyPlaylistText(data);
+      results.push({ url, kind });
+      if (kind === 'video-media' || kind === 'master') continue;
+    } catch (e) {
+      results.push({ url, kind: 'error:' + (e.code || e.message) });
+    }
+  }
+  return results;
+}
+
+function classifyPlaylistText(text) {
+  if (!/^#EXTM3U/.test(text.trim())) return 'not-playlist';
+  if (/#EXT-X-STREAM-INF/i.test(text)) return 'master';
+  const lines = text.split(/\r?\n/).filter(l => l && !l.startsWith('#'));
+  const exts = lines.map(l => l.split(/[?#]/)[0].toLowerCase());
+  const hasVideoSeg = exts.some(e => /\.(ts|m4s|mp4|aac)$/.test(e));
+  const hasImages = exts.some(e => /\.(jpe?g|png|webp)$/.test(e));
+  if (hasVideoSeg) return 'video-media';
+  if (hasImages && !hasVideoSeg) return 'image-media';
+  return 'unknown-media';
+}
+
+function pickBestPlaylist(evaluated) {
+  const order = ['master', 'video-media', 'unknown-media', 'image-media'];
+  evaluated.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  return evaluated.find(e => e.kind === 'master') ||
+         evaluated.find(e => e.kind === 'video-media') ||
+         null;
+}
+
+export { classifyPlaylistText };

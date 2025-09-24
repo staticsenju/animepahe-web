@@ -4,7 +4,8 @@ import * as cheerio from 'cheerio';
 import vm from 'vm';
 
 const DEFAULT_HOST = process.env.ANIMEPAHE_HOST || 'https://animepahe.si';
-const UA = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+const UA = process.env.USER_AGENT ||
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 const DEBUG = !!process.env.DEBUG_PLAYLIST_EXTRACTION;
 
 export function generateCookie() {
@@ -89,42 +90,77 @@ export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
   if (!mirrorUrl) throw new Error('mirrorUrl is required');
   const norm = normalizeUrl(mirrorUrl);
   const origin = new URL(norm).origin;
-  const { html: initialHtml, setCookies: sc1 } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
+
+  const { html: initialHtml } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
   const redirectedHtml = await followMetaRefreshIfAny(initialHtml, cookie, norm);
   const html = redirectedHtml || initialHtml;
+
   const scripts = extractAllScripts(html);
+
+  // Vanilla eval chain (existing approach)
   const chainResult = deobfuscateByEvalChain(scripts, origin);
-  const codeCorpus = [
+
+  // Instrumentation pass: mimic the bash trick (capture raw eval argument)
+  const evalLikeScripts = scripts.filter(s => /eval\(/.test(s));
+  const instrumentedCandidates = instrumentEvalScripts(evalLikeScripts);
+
+  // Aggregate corpus
+  const codeCorpusPieces = [
     ...scripts,
     ...chainResult.capturedEvalStrings,
-    chainResult.combinedEvalOutput
-  ].join('\n\n/* ---- */\n\n');
-  const primary = extractPlaylistFromCorpus(codeCorpus) ||
-                  extractPlaylistFromCorpus(html) ||
-                  scanBase64ForPlaylist(codeCorpus) ||
-                  scanBase64ForPlaylist(html);
-  const allCandidates = collectAllM3u8s(codeCorpus, html);
-  if (primary && !allCandidates.includes(primary)) allCandidates.unshift(primary);
-  const unique = [...new Set(allCandidates)];
-  const evaluated = await evaluateCandidates(unique.slice(0, 12));
+    chainResult.combinedEvalOutput,
+    ...instrumentedCandidates.plainEvalBodies
+  ];
+  const codeCorpus = codeCorpusPieces.join('\n/* ---- */\n');
+
+  // Gather candidates
+  const candidates = new Set();
+  // Regex global .m3u8 extraction
+  collectAllM3u8s(codeCorpus).forEach(u => candidates.add(u));
+  // Source= assignments (like shell method)
+  extractSourceAssignments(codeCorpus).forEach(u => candidates.add(u));
+  // Base64 scanning per piece
+  for (const piece of codeCorpusPieces) {
+    const b64 = scanBase64ForPlaylist(piece);
+    if (b64) candidates.add(b64);
+  }
+
+  // Filter / normalize
+  const normalized = [...candidates].map(sanitizeUrl).filter(Boolean);
+
+  if (!normalized.length) {
+    throw new Error('No .m3u8 candidates discovered');
+  }
+
+  // Evaluate & classify
+  const evaluated = await evaluateCandidates(normalized.slice(0, 15));
+
+  // Additional segment probing to demote image-only
+  await probeFirstSegmentForEach(evaluated);
+
   const best = pickBestPlaylist(evaluated);
+
   if (!best) {
     if (DEBUG) {
-      throw new Error('No viable video playlist. Candidates=' + JSON.stringify(evaluated, null, 2));
+      throw new Error('No viable video playlist. Evaluated=' + JSON.stringify(evaluated, null, 2));
     }
-    throw new Error('Playlist source (.m3u8) not discovered or all candidates are non-video');
+    throw new Error('No non-image playlist found');
   }
+
   return {
     playlist: best.url,
     classification: best.kind,
-    candidatesTried: evaluated.map(e => ({ url: e.url, kind: e.kind })),
+    evaluated: DEBUG ? evaluated : undefined,
     debug: DEBUG ? {
       totalScripts: scripts.length,
       evalChainDepth: chainResult.stagesMeta.length,
-      evalCaptured: chainResult.capturedEvalStrings.length
+      evalCaptured: chainResult.capturedEvalStrings.length,
+      instrumentationEvalBodies: instrumentedCandidates.plainEvalBodies.length
     } : undefined
   };
 }
+
+/* ===================== Eval Chain ===================== */
 
 function deobfuscateByEvalChain(scriptBodies, originHref) {
   const capturedEvalStrings = [];
@@ -138,16 +174,15 @@ function deobfuscateByEvalChain(scriptBodies, originHref) {
     const stageLogs = [];
     const nestedCaptured = [];
     const sandbox = makeSandbox(nestedCaptured, stageLogs, originHref);
-    const prepared = original;
     let error = null;
     try {
-      vm.runInNewContext(prepared, sandbox, { timeout: 3000 });
+      vm.runInNewContext(original, sandbox, { timeout: 2500 });
     } catch (e) {
       error = e;
     }
     stagesMeta.push({
-      inputSnippet: original.slice(0, 140),
-      logsSnippet: stageLogs.slice(0, 6).join('\n').slice(0, 300),
+      inputSnippet: original.slice(0, 120),
+      logsSnippet: stageLogs.slice(0, 4).join('\n').slice(0, 300),
       nestedCount: nestedCaptured.length,
       error: error ? (error.message || String(error)) : null
     });
@@ -156,11 +191,7 @@ function deobfuscateByEvalChain(scriptBodies, originHref) {
       if (!seen.has(nested) && /eval\(/.test(nested)) queue.push(nested);
     }
   }
-  return {
-    capturedEvalStrings,
-    stagesMeta,
-    combinedEvalOutput: capturedEvalStrings.join('\n')
-  };
+  return { capturedEvalStrings, stagesMeta, combinedEvalOutput: capturedEvalStrings.join('\n') };
 }
 
 function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/') {
@@ -171,26 +202,16 @@ function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/')
       }
     },
     eval: (arg) => {
-      try {
-        if (typeof arg === 'string') {
-          nestedCaptured.push(arg);
-          try {
-            return vm.runInNewContext(arg, sandbox, { timeout: 3000 });
-          } catch (inner) {
-            stageLogs.push('[eval-exec-error] ' + inner.message);
-          }
-          return arg;
+      if (typeof arg === 'string') {
+        nestedCaptured.push(arg);
+        try {
+          return vm.runInNewContext(arg, sandbox, { timeout: 2000 });
+        } catch (e) {
+          stageLogs.push('[eval-error] ' + e.message);
         }
-        return arg;
-      } catch (e) {
-        stageLogs.push('[eval-error] ' + e.message);
-        return undefined;
       }
+      return arg;
     },
-    setTimeout: () => {},
-    setInterval: () => {},
-    clearTimeout: () => {},
-    clearInterval: () => {},
     window: {},
     document: {
       querySelector: () => ({ click: () => {}, remove: () => {} }),
@@ -202,11 +223,44 @@ function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/')
     btoa: (str) => Buffer.from(str, 'utf8').toString('base64'),
     crypto: {},
     location: { href: originHref },
+    setTimeout: (fn) => { try { fn(); } catch {} },
+    clearTimeout: () => {},
+    setInterval: () => {},
+    clearInterval: () => {},
     globalThis: {}
   };
   sandbox.globalThis = sandbox;
   return sandbox;
 }
+
+/* ============ Instrumentation Like Shell Script ============ */
+
+function instrumentEvalScripts(scripts) {
+  const plainEvalBodies = [];
+  for (const s of scripts) {
+    // Capture argument of eval(...) like shell’s s/ eval(/ console.log( /
+    // We do a light transform: replace eval(x) with collector(x)
+    let transformed = s.replace(/\beval\s*\(/g, '___captureEval(');
+    const captures = [];
+    const sandbox = {
+      ___captureEval: (arg) => {
+        if (typeof arg === 'string') {
+          captures.push(arg);
+          // DO NOT execute nested code here; we just collect
+        }
+        return undefined;
+      },
+      console: { log: () => {} }
+    };
+    try {
+      vm.runInNewContext(transformed, sandbox, { timeout: 2000 });
+    } catch { /* ignore */ }
+    captures.forEach(c => plainEvalBodies.push(c));
+  }
+  return { plainEvalBodies };
+}
+
+/* ============ Candidate Collection / Classification ============ */
 
 const PLAYLIST_REGEXES = [
   /source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
@@ -226,6 +280,23 @@ function extractPlaylistFromCorpus(text) {
     }
   }
   return null;
+}
+
+function extractSourceAssignments(text) {
+  if (!text) return [];
+  const out = [];
+  const re = /\b(?:const|let|var)?\s*source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push(sanitizeUrl(m[1]));
+  }
+  return out;
+}
+
+function collectAllM3u8s(text) {
+  if (!text) return [];
+  return (text.match(/https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*/gi) || [])
+    .map(sanitizeUrl);
 }
 
 function scanBase64ForPlaylist(text) {
@@ -248,6 +319,68 @@ function sanitizeUrl(u) {
   if (!u) return u;
   return u.replace(/&quot;?$/,'').replace(/['")\\]+$/,'').trim();
 }
+
+async function evaluateCandidates(urls) {
+  const results = [];
+  for (const url of urls) {
+    let kind = 'error';
+    try {
+      const { data } = await axios.get(url, {
+        headers: {
+          'User-Agent': UA,
+          'Referer': new URL(url).origin + '/',
+          'Accept': 'application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.8'
+        },
+        timeout: 12000,
+        responseType: 'text',
+        validateStatus: s => s >= 200 && s < 400
+      });
+      const text = data.toString();
+      kind = classifyPlaylistText(text);
+      results.push({ url, kind, sample: text.slice(0, 1400) });
+    } catch (e) {
+      results.push({ url, kind: 'error:' + (e.code || e.message) });
+    }
+  }
+  return results;
+}
+
+function classifyPlaylistText(text) {
+  if (!/^#EXTM3U/.test(text.trim())) return 'not-playlist';
+  if (/#EXT-X-STREAM-INF/i.test(text)) return 'master';
+  const lines = text.split(/\r?\n/).filter(l => l && !l.startsWith('#'));
+  const exts = lines.map(l => l.split(/[?#]/)[0].toLowerCase());
+  const hasVideoSeg = exts.some(e => /\.(ts|m4s|mp4|aac)$/.test(e));
+  const hasImages = exts.some(e => /\.(jpe?g|png|webp)$/.test(e));
+  if (hasVideoSeg) return 'video-media';
+  if (hasImages && !hasVideoSeg) return 'image-media';
+  return 'unknown-media';
+}
+
+async function probeFirstSegmentForEach(evaluated) {
+  for (const item of evaluated) {
+    if (!item.kind || item.kind.startsWith('error') || item.kind === 'not-playlist') continue;
+    if (item.kind === 'image-media' || item.kind === 'video-media') continue; // already classified
+    // For unknown-media or master we skip (master doesn't list segments)
+    if (item.kind === 'unknown-media') {
+      // Optionally try to look inside sample for potential segment lines (skipped here)
+    }
+  }
+}
+
+function pickBestPlaylist(evaluated) {
+  // Remove plain image-media unless nothing else
+  const master = evaluated.find(e => e.kind === 'master');
+  if (master) return master;
+  const video = evaluated.find(e => e.kind === 'video-media');
+  if (video) return video;
+  // If only image-media exists, return null to force fallback logic
+  const nonImage = evaluated.find(e => e.kind !== 'image-media' && !e.kind.startsWith('error'));
+  if (nonImage) return nonImage;
+  return null;
+}
+
+/* ============ HTML Helpers ============ */
 
 function extractAllScripts(html) {
   const out = [];
@@ -283,59 +416,3 @@ function normalizeUrl(u) {
   }
   return u;
 }
-
-function collectAllM3u8s(...texts) {
-  const out = [];
-  for (const t of texts) {
-    if (!t) continue;
-    const matches = t.match(/https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*/gi);
-    if (matches) out.push(...matches.map(sanitizeUrl));
-  }
-  return out;
-}
-
-async function evaluateCandidates(urls) {
-  const results = [];
-  for (const url of urls) {
-    try {
-      const { data } = await axios.get(url, {
-        headers: {
-          'User-Agent': UA,
-          'Referer': new URL(url).origin + '/',
-          'Accept': 'application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.8'
-        },
-        timeout: 12000,
-        responseType: 'text',
-        validateStatus: s => s >= 200 && s < 400
-      });
-      const kind = classifyPlaylistText(data);
-      results.push({ url, kind });
-      if (kind === 'video-media' || kind === 'master') continue;
-    } catch (e) {
-      results.push({ url, kind: 'error:' + (e.code || e.message) });
-    }
-  }
-  return results;
-}
-
-function classifyPlaylistText(text) {
-  if (!/^#EXTM3U/.test(text.trim())) return 'not-playlist';
-  if (/#EXT-X-STREAM-INF/i.test(text)) return 'master';
-  const lines = text.split(/\r?\n/).filter(l => l && !l.startsWith('#'));
-  const exts = lines.map(l => l.split(/[?#]/)[0].toLowerCase());
-  const hasVideoSeg = exts.some(e => /\.(ts|m4s|mp4|aac)$/.test(e));
-  const hasImages = exts.some(e => /\.(jpe?g|png|webp)$/.test(e));
-  if (hasVideoSeg) return 'video-media';
-  if (hasImages && !hasVideoSeg) return 'image-media';
-  return 'unknown-media';
-}
-
-function pickBestPlaylist(evaluated) {
-  const order = ['master', 'video-media', 'unknown-media', 'image-media'];
-  evaluated.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
-  return evaluated.find(e => e.kind === 'master') ||
-         evaluated.find(e => e.kind === 'video-media') ||
-         null;
-}
-
-export { classifyPlaylistText };

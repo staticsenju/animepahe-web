@@ -22,7 +22,6 @@ export async function searchAnime(query) {
   return results;
 }
 
-// Fetch all episodes for a session (paginate)
 export async function fetchAllEpisodes(animeSession, { force = false } = {}) {
   if (!force && animeEpisodesCache.has(animeSession)) {
     return animeEpisodesCache.get(animeSession);
@@ -59,14 +58,12 @@ export async function fetchAllEpisodes(animeSession, { force = false } = {}) {
   return payload;
 }
 
-// Find episode's session by episode number
 export async function getEpisodeSessionForNumber(animeSession, episodeNumber) {
   const cache = await fetchAllEpisodes(animeSession);
   const ep = cache.episodes.find(e => Number(e.episode) === Number(episodeNumber));
   return ep ? ep.session : null;
 }
 
-// Fetch /play page HTML
 export async function fetchPlayPage(animeSession, episodeSession) {
   const url = `${HOST}/play/${animeSession}/${episodeSession}`;
   const { data } = await axios.get(url, {
@@ -78,7 +75,6 @@ export async function fetchPlayPage(animeSession, episodeSession) {
   return data;
 }
 
-// Parse <button ... data-src="..."> elements; gather data-* attributes
 export function parseButtonsFromPlayPage(html) {
   const results = [];
   if (typeof html !== 'string') return results;

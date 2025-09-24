@@ -1,4 +1,4 @@
-import path from 'path';
+eimport path from 'path';
 import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
@@ -254,6 +254,108 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
+const HLS_ALLOWED_HOSTS = (process.env.HLS_ALLOWED_HOSTS || 'kwik.si,uwucdn.top,vault-01.uwucdn.top').split(',').map(h => h.trim().toLowerCase());
+
+app.get('/api/hls', async (req, res) => {
+  const target = req.query.u;
+  const cookieRaw = req.query.c || ''; 
+  if (!target) return res.status(400).json({ error: 'Missing u parameter' });
+
+  let decoded;
+  try {
+    decoded = decodeURIComponent(target);
+  } catch {
+    return res.status(400).json({ error: 'Invalid encoded URL' });
+  }
+
+  try {
+    const u = new URL(decoded);
+    const hostOk = HLS_ALLOWED_HOSTS.some(h => u.hostname === h || u.hostname.endsWith('.' + h));
+    if (!hostOk) {
+      return res.status(403).json({ error: 'Host not allowed for proxy', host: u.hostname });
+    }
+  } catch {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
+
+  const isManifest = /\.m3u8(\?|$)/i.test(decoded);
+
+  try {
+    const upstream = await axios.get(decoded, {
+      responseType: isManifest ? 'text' : 'arraybuffer',
+      timeout: 20000,
+      headers: {
+        'User-Agent': process.env.USER_AGENT ||
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Referer': 'https://kwik.si/',
+        'Accept': isManifest
+          ? 'application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.8'
+          : '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        ...(cookieRaw ? { 'Cookie': cookieRaw } : {})
+      },
+      validateStatus: s => s >= 200 && s < 400,
+      maxRedirects: 3
+    });
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, Range, Accept, User-Agent');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Content-Length, Accept-Ranges');
+
+    if (!isManifest) {
+      const ct = upstream.headers['content-type'] || 'application/octet-stream';
+      res.setHeader('Content-Type', ct);
+      if (upstream.headers['accept-ranges']) {
+        res.setHeader('Accept-Ranges', upstream.headers['accept-ranges']);
+      }
+      return res.send(upstream.data);
+    }
+
+    const originalText = upstream.data;
+    const base = decoded.split('/').slice(0, -1).join('/');
+    const rewritten = rewriteManifest(originalText, base, cookieRaw);
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    return res.send(rewritten);
+
+  } catch (e) {
+    return res.status(502).json({
+      error: 'Upstream fetch failed',
+      details: e.message
+    });
+  }
+});
+
+function rewriteManifest(manifestText, base, cookieRaw) {
+  const makeProxy = (abs) =>
+    '/api/hls?u=' + encodeURIComponent(abs) + (cookieRaw ? '&c=' + encodeURIComponent(cookieRaw) : '');
+
+  const lines = manifestText.split(/\r?\n/);
+  return lines.map(line => {
+    if (!line || line.startsWith('#')) {
+      if (/^#EXT-X-KEY/i.test(line)) {
+        line = line.replace(/URI="([^"]+)"/i, (m, g1) => {
+          const abs = absolutize(g1, base);
+            return 'URI="' + makeProxy(abs) + '"';
+        });
+      }
+      return line;
+    }
+    const abs = absolutize(line.trim(), base);
+    return makeProxy(abs);
+  }).join('\n');
+}
+
+function absolutize(ref, base) {
+  if (!ref) return ref;
+  if (/^https?:\/\//i.test(ref)) return ref;
+  if (ref.startsWith('//')) return 'https:' + ref;
+  if (ref.startsWith('/')) {
+    const origin = base.split('/').slice(0, 3).join('/');
+    return origin + ref;
+  }
+  return base + '/' + ref.replace(/^\.\//, '');
+}
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 

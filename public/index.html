@@ -7,132 +7,29 @@
 <style>
   :root {
     color-scheme: dark light;
-    --bg: #111;
-    --fg: #eee;
-    --accent: #6c5ce7;
-    --error: #e74c3c;
-    --card: #1e1e1e;
+    --bg:#111;--fg:#eee;--accent:#6c5ce7;--error:#e74c3c;--card:#1e1e1e;
   }
-  body {
-    margin: 0;
-    font-family: system-ui, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--fg);
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-  }
-  header {
-    padding: 1rem;
-    background: #181818;
-    display: flex;
-    gap: .75rem;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  input[type="text"] {
-    flex: 1 1 260px;
-    padding: .6rem .75rem;
-    border: 1px solid #333;
-    background: #222;
-    color: var(--fg);
-    border-radius: 6px;
-    font-size: 1rem;
-  }
-  button {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    padding: .65rem 1rem;
-    font-size: 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  main {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 320px 1fr 400px;
-    gap: 1rem;
-    padding: 1rem;
-  }
-  section {
-    background: var(--card);
-    border-radius: 10px;
-    padding: .75rem .9rem;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    gap: .5rem;
-  }
-  h2 {
-    margin: .2rem 0 .4rem;
-    font-size: 1.05rem;
-    letter-spacing: .5px;
-    text-transform: uppercase;
-    opacity: .75;
-  }
-  ul {
-    list-style: none;
-    padding: 0; margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: .4rem;
-  }
-  li {
-    background: #242424;
-    border: 1px solid #2f2f2f;
-    border-radius: 8px;
-    padding: .55rem .7rem;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: .25rem;
-    transition: background .15s;
-  }
-  li:hover { background: #2c2c2c; }
-  .active { outline: 2px solid var(--accent); }
-  .small {
-    font-size: .75rem;
-    opacity: .8;
-  }
-  .error {
-    color: var(--error);
-    font-size: .85rem;
-    margin-top: .25rem;
-  }
-  .loading {
-    opacity: .6;
-    font-style: italic;
-  }
-  .stream-links a {
-    color: var(--accent);
-    text-decoration: none;
-    word-break: break-all;
-    font-size: .8rem;
-  }
-  .badge {
-    display: inline-block;
-    background: #333;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: .65rem;
-    margin-right: 4px;
-    letter-spacing: .5px;
-  }
-  .row-actions {
-    display: flex;
-    gap: .5rem;
-    flex-wrap: wrap;
-  }
-  @media (max-width: 1150px) {
-    main { grid-template-columns: 1fr 1fr; }
-    section:nth-child(3) { grid-column: span 2; }
-  }
-  @media (max-width: 800px) {
-    main { grid-template-columns: 1fr; }
-    section:nth-child(2), section:nth-child(3) { grid-column: 1; }
-  }
+  body {margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;min-height:100vh;}
+  header {padding:1rem;background:#181818;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;}
+  input[type="text"] {flex:1 1 260px;padding:.6rem .75rem;border:1px solid #333;background:#222;color:var(--fg);border-radius:6px;font-size:1rem;}
+  button {background:var(--accent);color:#fff;border:none;padding:.65rem 1rem;font-size:1rem;border-radius:6px;cursor:pointer;}
+  button:disabled {opacity:.5;cursor:not-allowed;}
+  main {flex:1;display:grid;grid-template-columns:320px 1fr 400px;gap:1rem;padding:1rem;}
+  section {background:var(--card);border-radius:10px;padding:.75rem .9rem;overflow:auto;display:flex;flex-direction:column;gap:.5rem;}
+  h2 {margin:.2rem 0 .4rem;font-size:1.05rem;letter-spacing:.5px;text-transform:uppercase;opacity:.75;}
+  ul {list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem;}
+  li {background:#242424;border:1px solid #2f2f2f;border-radius:8px;padding:.55rem .7rem;cursor:pointer;display:flex;flex-direction:column;gap:.25rem;transition:background .15s;}
+  li:hover {background:#2c2c2c;}
+  .active {outline:2px solid var(--accent);}
+  .small {font-size:.75rem;opacity:.8;}
+  .error {color:var(--error);font-size:.85rem;margin-top:.25rem;}
+  .loading {opacity:.6;font-style:italic;}
+  .stream-links a {color:var(--accent);text-decoration:none;word-break:break-all;font-size:.8rem;}
+  .badge {display:inline-block;background:#333;padding:2px 6px;border-radius:4px;font-size:.65rem;margin-right:4px;letter-spacing:.5px;}
+  .row-actions {display:flex;gap:.5rem;flex-wrap:wrap;}
+  pre.debug {background:#000;padding:.5rem;border-radius:6px;max-height:200px;overflow:auto;font-size:.65rem;}
+  @media (max-width:1150px){main{grid-template-columns:1fr 1fr;}section:nth-child(3){grid-column:span 2;}}
+  @media (max-width:800px){main{grid-template-columns:1fr;}section:nth-child(2),section:nth-child(3){grid-column:1;}}
 </style>
 </head>
 <body>
@@ -142,12 +39,12 @@
   <span id="status" class="small"></span>
 </header>
 <main>
-  <section id="searchSection">
+  <section>
     <h2>Results</h2>
     <div id="searchInfo" class="small"></div>
     <ul id="results"></ul>
   </section>
-  <section id="episodesSection">
+  <section>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
       <h2 style="margin:0;">Episodes</h2>
       <div class="row-actions">
@@ -158,15 +55,21 @@
     <div id="episodesInfo" class="small"></div>
     <ul id="episodes"></ul>
   </section>
-  <section id="streamSection">
+  <section>
     <h2>Stream Links</h2>
     <div id="streamInfo" class="small"></div>
     <div class="stream-links" id="streamLinks"></div>
+    <details>
+      <summary class="small">Debug</summary>
+      <div class="small">
+        Last stream request:<br>
+        <code id="lastStreamURL"></code>
+      </div>
+    </details>
   </section>
 </main>
 <script>
-const apiBase = ''; // same-origin
-
+const apiBase = '';
 const els = {
   searchInput: document.getElementById('searchInput'),
   searchBtn: document.getElementById('searchBtn'),
@@ -178,46 +81,44 @@ const els = {
   streamInfo: document.getElementById('streamInfo'),
   streamLinks: document.getElementById('streamLinks'),
   refreshEpisodesBtn: document.getElementById('refreshEpisodesBtn'),
-  selectedAnime: document.getElementById('selectedAnime')
+  selectedAnime: document.getElementById('selectedAnime'),
+  lastStreamURL: document.getElementById('lastStreamURL')
 };
 
 let currentAnime = null;
 let currentEpisode = null;
 let lastEpisodesSession = null;
 
-function setStatus(msg, loading = false) {
+function setStatus(msg, loading=false){
   els.status.textContent = msg || '';
-  els.status.className = loading ? 'small loading' : 'small';
+  els.status.className = loading ? 'small loading':'small';
 }
-
-async function fetchJSON(url) {
+async function fetchJSON(url){
   const r = await fetch(url);
   let body = null;
   try { body = await r.json(); } catch {}
-  if (!r.ok) {
+  if(!r.ok){
     const reason = body?.error || r.statusText;
     throw new Error(`${r.status} ${reason}`);
   }
   return body;
 }
-
-function clearAll() {
-  els.results.innerHTML = '';
-  els.episodes.innerHTML = '';
-  els.streamLinks.innerHTML = '';
-  els.searchInfo.textContent = '';
-  els.episodesInfo.textContent = '';
-  els.streamInfo.textContent = '';
-  els.selectedAnime.textContent = '';
-  currentAnime = null;
-  currentEpisode = null;
-  lastEpisodesSession = null;
-  els.refreshEpisodesBtn.style.display = 'none';
+function clearAll(){
+  els.results.innerHTML='';
+  els.episodes.innerHTML='';
+  els.streamLinks.innerHTML='';
+  els.searchInfo.textContent='';
+  els.episodesInfo.textContent='';
+  els.streamInfo.textContent='';
+  els.selectedAnime.textContent='';
+  currentAnime=null;
+  currentEpisode=null;
+  lastEpisodesSession=null;
+  els.refreshEpisodesBtn.style.display='none';
 }
-
-async function doSearch() {
+async function doSearch(){
   const q = els.searchInput.value.trim();
-  if (!q) return;
+  if(!q) return;
   clearAll();
   setStatus('Searching...', true);
   els.searchBtn.disabled = true;
@@ -225,73 +126,65 @@ async function doSearch() {
     const data = await fetchJSON(`${apiBase}/api/search?q=${encodeURIComponent(q)}`);
     renderSearch(data);
     setStatus('Search complete');
-  } catch (e) {
+  } catch(e){
     setStatus('Search failed');
     els.searchInfo.innerHTML = `<span class="error">Error: ${e.message}</span>`;
   } finally {
     els.searchBtn.disabled = false;
   }
 }
-
-function extractSearchResults(data) {
-  // Upstream raw search returns { data: [...] }
-  if (Array.isArray(data?.data)) return data.data;
-  if (Array.isArray(data?.results)) return data.results;
-  if (Array.isArray(data)) return data;
+function extractSearchResults(data){
+  if(Array.isArray(data?.data)) return data.data;
+  if(Array.isArray(data?.results)) return data.results;
+  if(Array.isArray(data)) return data;
   return [];
 }
-
-function renderSearch(data) {
+function renderSearch(data){
   const results = extractSearchResults(data);
   els.searchInfo.textContent = `${results.length} result(s)`;
-  results.forEach(item => {
-    const li = document.createElement('li');
-    const title = item.title || item.title_english || item.slug || 'Unknown Title';
+  results.forEach(item=>{
+    const li=document.createElement('li');
+    const title = item.title || item.title_english || item.slug || 'Untitled';
     li.innerHTML = `
       <strong>${title}</strong>
       <span class="small">
         <span class="badge">ID</span>${item.id ?? 'n/a'}
         <span class="badge">SESSION</span>${item.session || 'n/a'}
       </span>
-      ${item.type ? `<span class="small"><span class="badge">Type</span>${item.type}</span>` : ''}
-      ${item.episodes ? `<span class="small"><span class="badge">Episodes</span>${item.episodes}</span>` : ''}
+      ${item.type ? `<span class="small"><span class="badge">Type</span>${item.type}</span>`:''}
+      ${item.episodes ? `<span class="small"><span class="badge">Episodes</span>${item.episodes}</span>`:''}
     `;
-    li.addEventListener('click', () => {
-      document.querySelectorAll('#results li').forEach(n => n.classList.remove('active'));
+    li.addEventListener('click', ()=>{
+      document.querySelectorAll('#results li').forEach(n=>n.classList.remove('active'));
       li.classList.add('active');
-      currentAnime = item;
-      currentEpisode = null;
-      els.streamLinks.innerHTML = '';
-      els.streamInfo.textContent = '';
+      currentAnime=item;
+      currentEpisode=null;
+      els.streamLinks.innerHTML='';
+      els.streamInfo.textContent='';
       loadEpisodes(item.session || item.id);
     });
     els.results.appendChild(li);
   });
 }
-
-async function loadEpisodes(sessionOrId, { refresh = false } = {}) {
-  els.episodes.innerHTML = '';
-  els.episodesInfo.textContent = 'Loading episodes...';
-  els.refreshEpisodesBtn.style.display = 'inline-block';
-  els.refreshEpisodesBtn.disabled = true;
-  lastEpisodesSession = sessionOrId;
-
+async function loadEpisodes(sessionOrId,{refresh=false}={}){
+  els.episodes.innerHTML='';
+  els.episodesInfo.textContent='Loading episodes...';
+  els.refreshEpisodesBtn.style.display='inline-block';
+  els.refreshEpisodesBtn.disabled=true;
+  lastEpisodesSession=sessionOrId;
   try {
-    const url = `${apiBase}/api/episodes?id=${encodeURIComponent(sessionOrId)}${refresh ? '&refresh=1' : ''}`;
+    const url = `${apiBase}/api/episodes?id=${encodeURIComponent(sessionOrId)}${refresh?'&refresh=1':''}`;
     const data = await fetchJSON(url);
     renderEpisodes(data);
-  } catch (e) {
-    els.episodesInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
+  } catch(e){
+    els.episodesInfo.innerHTML=`<span class="error">Failed: ${e.message}</span>`;
   } finally {
-    els.refreshEpisodesBtn.disabled = false;
+    els.refreshEpisodesBtn.disabled=false;
   }
 }
-
-function renderEpisodes(data) {
-  // New aggregated response: { session, total, last_page, episodes: [], cached }
-  const episodes = Array.isArray(data?.episodes)
-    ? data.episodes
-    : (data?.data?.episodes || data?.data || []);
+function renderEpisodes(data){
+  const episodes = Array.isArray(data?.episodes) ? data.episodes :
+    (data?.data?.episodes || data?.data || []);
   const total = data.total ?? episodes.length;
   const lastPage = data.last_page ?? '?';
   const cached = data.cached ? ' (cached)' : '';
@@ -299,76 +192,79 @@ function renderEpisodes(data) {
   els.selectedAnime.innerHTML = currentAnime
     ? `<strong>${currentAnime.title || currentAnime.title_english || 'Selected Anime'}</strong><br>
        <span class="small">
-         Using session: <code>${data.session || currentAnime.session || 'n/a'}</code>
-         ${currentAnime.id ? ` | Numeric id: <code>${currentAnime.id}</code>` : ''}
+         Session: <code>${data.session || currentAnime.session || 'n/a'}</code>
+         ${currentAnime.id ? ` | Numeric: <code>${currentAnime.id}</code>`:''}
        </span>`
     : `<span class="small">Session: ${data.session}</span>`;
 
-  episodes.forEach(ep => {
-    const li = document.createElement('li');
+  episodes.forEach(ep=>{
     const epNum = ep.episode ?? ep.episode_number ?? ep.number ?? '?';
     const epSession = ep.session || '';
-    const created = ep.created_at ? `<span class="small">${new Date(ep.created_at).toLocaleString()}</span>` : '';
+    const epId = ep.id || ep.episode_id || '';
+    const created = ep.created_at ? `<span class="small">${new Date(ep.created_at).toLocaleString()}</span>`:'';
+    const li=document.createElement('li');
     li.innerHTML = `
       <strong>Episode ${epNum}</strong>
       ${created}
-      <span class="small"><span class="badge">EP_SESSION</span>${epSession || 'n/a'}</span>
+      <span class="small">
+        <span class="badge">ID</span>${epId || 'n/a'}
+        <span class="badge">SESSION</span>${epSession || 'n/a'}
+      </span>
     `;
-    li.addEventListener('click', () => {
-      document.querySelectorAll('#episodes li').forEach(n => n.classList.remove('active'));
+    li.addEventListener('click', ()=>{
+      document.querySelectorAll('#episodes li').forEach(n=>n.classList.remove('active'));
       li.classList.add('active');
-      currentEpisode = ep;
-      loadStream(ep.session || ep.id || ep.episode_id || epNum);
+      currentEpisode=ep;
+      if(!epId || !epSession){
+        els.streamInfo.innerHTML='<span class="error">Episode missing id or session; cannot load links.</span>';
+        els.streamLinks.innerHTML='';
+        return;
+      }
+      loadStream(epId, epSession);
     });
     els.episodes.appendChild(li);
   });
 
-  if (!episodes.length) {
+  if(!episodes.length){
     els.episodesInfo.innerHTML += `<div class="error">No episodes returned.</div>`;
   }
 }
-
-async function loadStream(episodeId, episodeSession) {
-  els.streamLinks.innerHTML = '';
-  els.streamInfo.textContent = 'Loading stream links...';
+async function loadStream(episodeId, episodeSession){
+  els.streamLinks.innerHTML='';
+  els.streamInfo.textContent='Loading stream links...';
+  const url = `${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}&session=${encodeURIComponent(episodeSession)}`;
+  els.lastStreamURL.textContent = url;
   try {
-    const url = `${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}&session=${encodeURIComponent(episodeSession)}`;
     const data = await fetchJSON(url);
     const links = Array.isArray(data?.data?.links) ? data.data.links
                 : Array.isArray(data?.links) ? data.links
                 : (Array.isArray(data) ? data : []);
-    if (!Array.isArray(links)) {
-      els.streamInfo.textContent = 'Unexpected response';
-      els.streamLinks.textContent = JSON.stringify(data, null, 2);
+    if(!Array.isArray(links)){
+      els.streamInfo.textContent='Unexpected response shape';
+      els.streamLinks.textContent=JSON.stringify(data,null,2);
       return;
     }
-    els.streamInfo.textContent = `${links.length} link(s)`;
-    links.forEach(l => {
-      const a = document.createElement('a');
+    els.streamInfo.textContent=`${links.length} link(s)`;
+    links.forEach(l=>{
+      const a=document.createElement('a');
       a.href = l.url || l.link || l.playlist || '#';
-      a.target = '_blank';
-      a.rel = 'noopener';
+      a.target='_blank'; a.rel='noopener';
       const labelRes = l.resolution || l.quality || '';
       const labelHost = l.server || l.cdn || l.host || '';
       a.textContent = `${labelRes}${labelRes && labelHost ? ' - ' : ''}${labelHost} ${a.href}`;
       els.streamLinks.appendChild(a);
       els.streamLinks.appendChild(document.createElement('br'));
     });
-  } catch (e) {
+  } catch(e){
     els.streamInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
   }
 }
 
-
-// Event bindings
+// Events
 els.searchBtn.addEventListener('click', doSearch);
-els.searchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') doSearch();
-});
-els.refreshEpisodesBtn.addEventListener('click', () => {
-  if (lastEpisodesSession) {
-    loadEpisodes(lastEpisodesSession, { refresh: true });
-  }
+els.searchInput.addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
+els.refreshEpisodesBtn.addEventListener('click', ()=>{
+  if(lastEpisodesSession) loadEpisodes(lastEpisodesSession,{refresh:true});
 });
 </script>
 </body>

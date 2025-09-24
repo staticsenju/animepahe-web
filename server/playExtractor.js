@@ -13,21 +13,6 @@ export function generateCookie() {
   return `__ddg2_=${raw}`;
 }
 
-function httpForAnime(cookie) {
-  return axios.create({
-    baseURL: DEFAULT_HOST,
-    headers: {
-      'User-Agent': UA,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': DEFAULT_HOST + '/',
-      'Cookie': cookie
-    },
-    timeout: 15000,
-    validateStatus: s => s >= 200 && s < 400
-  });
-}
-
 async function fetchHtmlAbsolute(url, cookie, referer) {
   const headers = {
     'User-Agent': UA,
@@ -47,10 +32,17 @@ async function fetchHtmlAbsolute(url, cookie, referer) {
 }
 
 export async function fetchPlayPage(slug, episodeSession, cookie) {
-  const http = httpForAnime(cookie);
-  const path = `/play/${slug}/${episodeSession}`;
-  const { data } = await http.get(path);
-  return data;
+  const resp = await axios.get(`${DEFAULT_HOST}/play/${slug}/${episodeSession}`, {
+    headers: {
+      'User-Agent': UA,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Referer': DEFAULT_HOST + '/',
+      'Cookie': cookie
+    },
+    timeout: 15000,
+    validateStatus: s => s >= 200 && s < 400
+  });
+  return resp.data;
 }
 
 export function extractButtons(html) {
@@ -73,78 +65,76 @@ export function chooseButton(buttons, { audio, resolution }) {
   if (!buttons || !buttons.length) return null;
   let candidates = buttons.slice();
   if (audio) {
-    const audFiltered = candidates.filter(b => b.audio === audio);
-    if (audFiltered.length) candidates = audFiltered;
+    const aud = candidates.filter(b => b.audio === audio);
+    if (aud.length) candidates = aud;
   }
   if (resolution) {
-    const resFiltered = candidates.filter(b => b.resolution === resolution);
-    if (resFiltered.length) candidates = resFiltered;
+    const res = candidates.filter(b => b.resolution === resolution);
+    if (res.length) candidates = res;
   }
   const nonAv1 = candidates.filter(b => b.av1 === '0');
   if (nonAv1.length) candidates = nonAv1;
   candidates.sort((a, b) => (parseInt(b.resolution || '0', 10) - parseInt(a.resolution || '0', 10)));
-  return candidates[0] || null;
+  return candidates[0];
 }
+
+/* ===================== Core Extraction ===================== */
 
 export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
   if (!mirrorUrl) throw new Error('mirrorUrl is required');
-  const norm = normalizeUrl(mirrorUrl);
-  const origin = new URL(norm).origin;
+  const normalizedMirror = normalizeUrl(mirrorUrl);
+  const origin = new URL(normalizedMirror).origin;
 
-  const { html: initialHtml } = await fetchHtmlAbsolute(norm, cookie, DEFAULT_HOST + '/');
-  const redirectedHtml = await followMetaRefreshIfAny(initialHtml, cookie, norm);
-  const html = redirectedHtml || initialHtml;
+  const { html: initialHtml } = await fetchHtmlAbsolute(normalizedMirror, cookie, DEFAULT_HOST + '/');
+  const redirectedHtml = await followMetaRefreshIfAny(initialHtml, cookie, normalizedMirror);
+  const pageHtml = redirectedHtml || initialHtml;
 
-  const scripts = extractAllScripts(html);
+  const scripts = extractAllScripts(pageHtml);
 
-  // Vanilla eval chain (existing approach)
+  // 1. Static packer unpack pass (inspiration from bash script)
+  const unpackedPieces = scripts.flatMap(s => unpackAllPacker(s));
+
+  // 2. Collect candidates from unpacked static code first
+  const staticCorpus = unpackedPieces.join('\n/* --- */\n');
+  const fromStatic = collectAllCandidates(staticCorpus);
+
+  // 3. Dynamic eval-chain (fallback / augment)
   const chainResult = deobfuscateByEvalChain(scripts, origin);
-
-  // Instrumentation pass: mimic the bash trick (capture raw eval argument)
-  const evalLikeScripts = scripts.filter(s => /eval\(/.test(s));
-  const instrumentedCandidates = instrumentEvalScripts(evalLikeScripts);
-
-  // Aggregate corpus
-  const codeCorpusPieces = [
-    ...scripts,
+  const dynamicCorpus = [
     ...chainResult.capturedEvalStrings,
-    chainResult.combinedEvalOutput,
-    ...instrumentedCandidates.plainEvalBodies
-  ];
-  const codeCorpus = codeCorpusPieces.join('\n/* ---- */\n');
+    chainResult.combinedEvalOutput
+  ].join('\n/* DYN */\n');
 
-  // Gather candidates
-  const candidates = new Set();
-  // Regex global .m3u8 extraction
-  collectAllM3u8s(codeCorpus).forEach(u => candidates.add(u));
-  // Source= assignments (like shell method)
-  extractSourceAssignments(codeCorpus).forEach(u => candidates.add(u));
-  // Base64 scanning per piece
-  for (const piece of codeCorpusPieces) {
-    const b64 = scanBase64ForPlaylist(piece);
-    if (b64) candidates.add(b64);
+  const fromDynamic = collectAllCandidates(dynamicCorpus);
+
+  // 4. Total candidate set
+  const allCandidatesSet = new Set([...fromStatic, ...fromDynamic]);
+  if (DEBUG) console.log('[EXTRACT] rawCandidates', [...allCandidatesSet]);
+
+  if (!allCandidatesSet.size) {
+    throw new Error('no_candidates_found');
   }
 
-  // Filter / normalize
-  const normalized = [...candidates].map(sanitizeUrl).filter(Boolean);
+  // 5. Deduplicate & normalize
+  const candidates = [...allCandidatesSet]
+    .map(sanitizeUrl)
+    .filter(u => u && /\.m3u8/i.test(u));
 
-  if (!normalized.length) {
-    throw new Error('No .m3u8 candidates discovered');
+  if (!candidates.length) throw new Error('no_m3u8_candidates');
+
+  // 6. Evaluate & classify
+  const evaluated = await evaluateCandidates(candidates.slice(0, 18));
+
+  if (DEBUG) {
+    console.log('[EXTRACT] evaluatedKinds',
+      evaluated.map(e => ({ kind: e.kind, url: e.url.slice(0, 90) })));
   }
-
-  // Evaluate & classify
-  const evaluated = await evaluateCandidates(normalized.slice(0, 15));
-
-  // Additional segment probing to demote image-only
-  await probeFirstSegmentForEach(evaluated);
 
   const best = pickBestPlaylist(evaluated);
 
   if (!best) {
-    if (DEBUG) {
-      throw new Error('No viable video playlist. Evaluated=' + JSON.stringify(evaluated, null, 2));
-    }
-    throw new Error('No non-image playlist found');
+    if (DEBUG) console.log('[EXTRACT] no non-image playlist found');
+    throw new Error('no_viable_video_playlist');
   }
 
   return {
@@ -153,19 +143,73 @@ export async function fetchPlaylistFromMirror(mirrorUrl, cookie) {
     evaluated: DEBUG ? evaluated : undefined,
     debug: DEBUG ? {
       totalScripts: scripts.length,
+      unpackedCount: unpackedPieces.length,
       evalChainDepth: chainResult.stagesMeta.length,
-      evalCaptured: chainResult.capturedEvalStrings.length,
-      instrumentationEvalBodies: instrumentedCandidates.plainEvalBodies.length
+      evalCaptured: chainResult.capturedEvalStrings.length
     } : undefined
   };
 }
 
-/* ===================== Eval Chain ===================== */
+/* ===================== Packer Unpacker ===================== */
+
+const PACKER_RE = /eval\(function\(p,a,c,k,e,d\)\{([\s\S]*?)\}\((['"])(.*?)\2\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\6\.split\('\|'\)\s*,\s*0\s*,\s*\{\}\)\);?/g;
+
+function unpackSinglePacker(match, body, pQuote, pPayload, aVal, cVal, kQuote, kList) {
+  try {
+    const a = parseInt(aVal, 10);
+    const c = parseInt(cVal, 10);
+    const k = kList.split('|');
+    // Basic guard
+    if (!pPayload || !k.length || isNaN(a) || isNaN(c)) return null;
+    // Replace tokens
+    let decoded = pPayload;
+    // Some packers escape backslashes; unescape common sequences
+    decoded = decoded.replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    // Token replacement function replicating base conversion
+    for (let i = c; i >= 0; i--) {
+      const baseToken = i.toString(a);
+      if (k[i]) {
+        const rx = new RegExp(`\\b${baseToken}\\b`, 'g');
+        decoded = decoded.replace(rx, k[i]);
+      }
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+function unpackAllPacker(src) {
+  const outputs = [src];
+  let last = src;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const nextFragments = [];
+    last.replace(PACKER_RE, (...args) => {
+      const unpacked = unpackSinglePacker(...args);
+      if (unpacked && unpacked !== last) {
+        changed = true;
+        nextFragments.push(unpacked);
+      }
+      return '';
+    });
+    if (changed) {
+      nextFragments.forEach(f => {
+        outputs.push(f);
+        last = f;
+      });
+    }
+  }
+  return outputs;
+}
+
+/* ===================== Dynamic Eval Chain ===================== */
 
 function deobfuscateByEvalChain(scriptBodies, originHref) {
   const capturedEvalStrings = [];
   const stagesMeta = [];
-  const queue = scriptBodies.filter(s => /eval\(/.test(s) || /source\s*=/.test(s)).slice();
+  const queue = scriptBodies.filter(s => /eval\(/.test(s)).slice();
   const seen = new Set();
   while (queue.length) {
     const original = queue.shift();
@@ -181,17 +225,21 @@ function deobfuscateByEvalChain(scriptBodies, originHref) {
       error = e;
     }
     stagesMeta.push({
-      inputSnippet: original.slice(0, 120),
-      logsSnippet: stageLogs.slice(0, 4).join('\n').slice(0, 300),
-      nestedCount: nestedCaptured.length,
+      snippet: original.slice(0, 140),
+      logs: stageLogs.slice(0, 3),
+      nested: nestedCaptured.length,
       error: error ? (error.message || String(error)) : null
     });
     for (const nested of nestedCaptured) {
       capturedEvalStrings.push(nested);
-      if (!seen.has(nested) && /eval\(/.test(nested)) queue.push(nested);
+      if (/eval\(/.test(nested) && !seen.has(nested)) queue.push(nested);
     }
   }
-  return { capturedEvalStrings, stagesMeta, combinedEvalOutput: capturedEvalStrings.join('\n') };
+  return {
+    capturedEvalStrings,
+    stagesMeta,
+    combinedEvalOutput: capturedEvalStrings.join('\n')
+  };
 }
 
 function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/') {
@@ -205,12 +253,12 @@ function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/')
       if (typeof arg === 'string') {
         nestedCaptured.push(arg);
         try {
-          return vm.runInNewContext(arg, sandbox, { timeout: 2000 });
+          return vm.runInNewContext(arg, sandbox, { timeout: 1500 });
         } catch (e) {
           stageLogs.push('[eval-error] ' + e.message);
         }
       }
-      return arg;
+      return undefined;
     },
     window: {},
     document: {
@@ -221,7 +269,6 @@ function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/')
     navigator: { userAgent: UA },
     atob: (b64) => Buffer.from(b64, 'base64').toString('utf8'),
     btoa: (str) => Buffer.from(str, 'utf8').toString('base64'),
-    crypto: {},
     location: { href: originHref },
     setTimeout: (fn) => { try { fn(); } catch {} },
     clearTimeout: () => {},
@@ -233,97 +280,41 @@ function makeSandbox(nestedCaptured, stageLogs, originHref = 'https://kwik.si/')
   return sandbox;
 }
 
-/* ============ Instrumentation Like Shell Script ============ */
+/* ===================== Candidate Harvest ===================== */
 
-function instrumentEvalScripts(scripts) {
-  const plainEvalBodies = [];
-  for (const s of scripts) {
-    // Capture argument of eval(...) like shell’s s/ eval(/ console.log( /
-    // We do a light transform: replace eval(x) with collector(x)
-    let transformed = s.replace(/\beval\s*\(/g, '___captureEval(');
-    const captures = [];
-    const sandbox = {
-      ___captureEval: (arg) => {
-        if (typeof arg === 'string') {
-          captures.push(arg);
-          // DO NOT execute nested code here; we just collect
-        }
-        return undefined;
-      },
-      console: { log: () => {} }
-    };
-    try {
-      vm.runInNewContext(transformed, sandbox, { timeout: 2000 });
-    } catch { /* ignore */ }
-    captures.forEach(c => plainEvalBodies.push(c));
-  }
-  return { plainEvalBodies };
-}
-
-/* ============ Candidate Collection / Classification ============ */
-
-const PLAYLIST_REGEXES = [
-  /source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
-  /['"]([^'"]+\.m3u8[^'"]*)['"]\s*[,;)]/i,
-  /\bfile\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
-  /\bsrc\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
-  /\burl\s*[:=]\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
-  /PLAYLIST\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i
-];
-
-function extractPlaylistFromCorpus(text) {
-  if (!text) return null;
-  for (const rx of PLAYLIST_REGEXES) {
-    const m = text.match(rx);
-    if (m && m[1]) {
-      return sanitizeUrl(m[1]);
-    }
-  }
-  return null;
-}
-
-function extractSourceAssignments(text) {
+function collectAllCandidates(text) {
   if (!text) return [];
-  const out = [];
-  const re = /\b(?:const|let|var)?\s*source\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/gi;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    out.push(sanitizeUrl(m[1]));
-  }
-  return out;
-}
+  const out = new Set();
 
-function collectAllM3u8s(text) {
-  if (!text) return [];
-  return (text.match(/https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*/gi) || [])
-    .map(sanitizeUrl);
-}
+  // 1. Raw .m3u8 URLs
+  (text.match(/https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*/gi) || [])
+    .forEach(u => out.add(sanitizeUrl(u)));
 
-function scanBase64ForPlaylist(text) {
-  if (!text) return null;
+  // 2. source= / q= assignments
+  (text.match(/\b(?:var|let|const)?\s*(?:source|q)\s*=\s*['"][^'"]+\.m3u8[^'"]*['"]/gi) || [])
+    .forEach(line => {
+      const m = line.match(/['"]([^'"]+\.m3u8[^'"]*)['"]/);
+      if (m && m[1]) out.add(sanitizeUrl(m[1]));
+    });
+
+  // 3. Base64 decode scan
   const candidates = text.match(/[A-Za-z0-9+/=]{40,}/g) || [];
-  for (const c of candidates.slice(0, 200)) {
+  for (const c of candidates.slice(0, 150)) {
     try {
       const decoded = Buffer.from(c, 'base64').toString('utf8');
       if (/\.m3u8/i.test(decoded)) {
-        const pl = extractPlaylistFromCorpus(decoded) ||
-                   decoded.match(/https?:\/\/[^\s'"]+\.m3u8[^\s'"]*/i)?.[0];
-        if (pl) return sanitizeUrl(pl);
+        const u = decoded.match(/https?:\/\/[^\s"'`]+\.m3u8[^\s"'`]*/i)?.[0];
+        if (u) out.add(sanitizeUrl(u));
       }
     } catch {}
   }
-  return null;
-}
 
-function sanitizeUrl(u) {
-  if (!u) return u;
-  return u.replace(/&quot;?$/,'').replace(/['")\\]+$/,'').trim();
+  return [...out];
 }
 
 async function evaluateCandidates(urls) {
   const results = [];
   for (const url of urls) {
-    let kind = 'error';
     try {
       const { data } = await axios.get(url, {
         headers: {
@@ -336,8 +327,12 @@ async function evaluateCandidates(urls) {
         validateStatus: s => s >= 200 && s < 400
       });
       const text = data.toString();
-      kind = classifyPlaylistText(text);
-      results.push({ url, kind, sample: text.slice(0, 1400) });
+      const kind = classifyPlaylistText(text);
+      results.push({
+        url,
+        kind,
+        firstLines: DEBUG ? text.split(/\r?\n/).slice(0, 6).join('\n') : undefined
+      });
     } catch (e) {
       results.push({ url, kind: 'error:' + (e.code || e.message) });
     }
@@ -349,38 +344,24 @@ function classifyPlaylistText(text) {
   if (!/^#EXTM3U/.test(text.trim())) return 'not-playlist';
   if (/#EXT-X-STREAM-INF/i.test(text)) return 'master';
   const lines = text.split(/\r?\n/).filter(l => l && !l.startsWith('#'));
-  const exts = lines.map(l => l.split(/[?#]/)[0].toLowerCase());
-  const hasVideoSeg = exts.some(e => /\.(ts|m4s|mp4|aac)$/.test(e));
-  const hasImages = exts.some(e => /\.(jpe?g|png|webp)$/.test(e));
-  if (hasVideoSeg) return 'video-media';
-  if (hasImages && !hasVideoSeg) return 'image-media';
+  const segs = lines.map(l => l.split(/[?#]/)[0].toLowerCase());
+  const hasVideo = segs.some(s => /\.(ts|m4s|mp4|aac)$/.test(s));
+  const hasImages = segs.some(s => /\.(jpe?g|png|webp)$/.test(s));
+  if (hasVideo) return 'video-media';
+  if (hasImages && !hasVideo) return 'image-media';
   return 'unknown-media';
 }
 
-async function probeFirstSegmentForEach(evaluated) {
-  for (const item of evaluated) {
-    if (!item.kind || item.kind.startsWith('error') || item.kind === 'not-playlist') continue;
-    if (item.kind === 'image-media' || item.kind === 'video-media') continue; // already classified
-    // For unknown-media or master we skip (master doesn't list segments)
-    if (item.kind === 'unknown-media') {
-      // Optionally try to look inside sample for potential segment lines (skipped here)
-    }
-  }
-}
-
 function pickBestPlaylist(evaluated) {
-  // Remove plain image-media unless nothing else
   const master = evaluated.find(e => e.kind === 'master');
   if (master) return master;
   const video = evaluated.find(e => e.kind === 'video-media');
   if (video) return video;
-  // If only image-media exists, return null to force fallback logic
-  const nonImage = evaluated.find(e => e.kind !== 'image-media' && !e.kind.startsWith('error'));
-  if (nonImage) return nonImage;
+  // If only image-media, return null -> signals failure (we avoid thumbnails)
   return null;
 }
 
-/* ============ HTML Helpers ============ */
+/* ===================== Utilities ===================== */
 
 function extractAllScripts(html) {
   const out = [];
@@ -398,13 +379,12 @@ async function followMetaRefreshIfAny(html, cookie, refererUrl) {
   if (!meta) return null;
   const urlMatch = meta[0].match(/url=([^"'>\s]+)/i);
   if (!urlMatch) return null;
-  const target = urlMatch[1];
-  let absolute = target;
-  if (!/^https?:/i.test(absolute)) {
+  let target = urlMatch[1];
+  if (!/^https?:/i.test(target)) {
     const base = refererUrl.split('/').slice(0, 3).join('/');
-    absolute = base + (target.startsWith('/') ? target : '/' + target);
+    target = base + (target.startsWith('/') ? target : '/' + target);
   }
-  const { html: followHtml } = await fetchHtmlAbsolute(absolute, cookie, refererUrl);
+  const { html: followHtml } = await fetchHtmlAbsolute(target, cookie, refererUrl);
   return followHtml;
 }
 
@@ -415,4 +395,9 @@ function normalizeUrl(u) {
     return 'https://kwik.si/' + u.replace(/^\/+/, '');
   }
   return u;
+}
+
+function sanitizeUrl(u) {
+  if (!u) return u;
+  return u.replace(/&quot;?$/,'').replace(/['")\\]+$/,'').trim();
 }

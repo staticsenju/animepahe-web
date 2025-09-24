@@ -39,7 +39,6 @@ function sendUpstreamError(res, err, fallback) {
   return res.status(500).json({ error: fallback });
 }
 
-// Simple in-memory full episodes cache
 const episodesCache = new Map();
 
 async function fetchAllEpisodes(session) {
@@ -171,8 +170,7 @@ app.get('/api/play/:slug/:epSession', async (req, res) => {
   }
 
   const selected = chooseButton(buttons, { audio, resolution });
-
-  // If client only wants list of links (like -l in ap.sh)
+  
   if (listOnly === 'true') {
     return res.json({
       slug,
@@ -270,7 +268,6 @@ app.get('/api/hls', async (req, res) => {
     return res.status(400).json({ error: 'Invalid encoded URL' });
   }
 
-  // Only allow http/https (still a minimal safeguard)
   if (!/^https?:\/\//i.test(target)) {
     return res.status(400).json({ error: 'Only absolute http/https URLs allowed' });
   }

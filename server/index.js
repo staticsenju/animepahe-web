@@ -138,6 +138,7 @@ app.get('/api/stream', async (req, res) => {
 
   if (!episodeId || !epSession) {
     const looksLikeSession = episodeId && episodeId.length > 40 && !epSession;
+    console.log('STREAM QUERY', params.toString());
     return res.status(400).json({
       error: 'Missing required parameters: episodeId AND session are required',
       hint: looksLikeSession

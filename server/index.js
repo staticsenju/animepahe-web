@@ -4,6 +4,13 @@ import express from 'express';
 import cors from 'cors';
 import { resolveSessionFromNumeric } from './resolver.js';
 import { upstream } from './upstream.js';
+import {
+  generateCookie,
+  fetchPlayPage,
+  extractButtons,
+  chooseButton,
+  fetchPlaylistFromMirror
+} from './playExtractor.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -132,6 +139,86 @@ app.get('/api/episodes', async (req, res) => {
     sendUpstreamError(res, err, 'Could not retrieve episodes');
   }
 });
+
+app.get('/api/play/:slug/:epSession', async (req, res) => {
+  const { slug, epSession } = req.params;
+  const { resolution, audio, listOnly } = req.query;
+
+  if (!slug || !epSession) {
+    return res.status(400).json({ error: 'Missing slug or epSession' });
+  }
+
+  const cookie = generateCookie();
+  let html;
+  try {
+    html = await fetchPlayPage(slug, epSession, cookie);
+  } catch (e) {
+    const status = e?.response?.status || 500;
+    return res.status(status).json({
+      error: 'Failed to fetch play page',
+      details: e.message
+    });
+  }
+
+  const buttons = extractButtons(html);
+  if (!buttons.length) {
+    return res.status(502).json({
+      error: 'No mirrors found (buttons with data-src missing)',
+      slug,
+      epSession
+    });
+  }
+
+  const selected = chooseButton(buttons, { audio, resolution });
+
+  // If client only wants list of links (like -l in ap.sh)
+  if (listOnly === 'true') {
+    return res.json({
+      slug,
+      epSession,
+      cookie,
+      filters: { audio: audio || null, resolution: resolution || null },
+      buttons,
+      selected
+    });
+  }
+
+  if (!selected) {
+    return res.status(422).json({
+      error: 'No suitable mirror after applying filters',
+      filtersTried: { audio, resolution },
+      available: buttons.map(b => ({
+        src: b.src,
+        resolution: b.resolution,
+        audio: b.audio,
+        av1: b.av1
+      }))
+    });
+  }
+
+  let playlistResult;
+  try {
+    playlistResult = await fetchPlaylistFromMirror(selected.src, cookie);
+  } catch (e) {
+    return res.status(502).json({
+      error: 'Failed to extract playlist',
+      mirror: selected.src,
+      details: e.message
+    });
+  }
+
+  res.json({
+    slug,
+    epSession,
+    cookie,
+    filters: { audio: audio || null, resolution: resolution || null },
+    buttons,
+    selected,
+    playlist: playlistResult.playlist,
+    debug: playlistResult.debug
+  });
+});
+
 app.get('/api/stream', async (req, res) => {
   const episodeId = (req.query.episodeId || '').trim();
   const epSession = (req.query.session || '').trim();

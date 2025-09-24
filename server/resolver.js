@@ -1,4 +1,3 @@
-// Improved resolver: numeric ID -> session using search with retry & shared upstream
 import { upstream } from './upstream.js';
 
 const idToSession = new Map();
@@ -11,7 +10,6 @@ async function searchRaw(q, attempt = 1) {
     return data?.data || data?.results || [];
   } catch (err) {
     const status = err?.response?.status;
-    // Retry a couple of times on 403/429 (potential transient WAF or rate limiting)
     if ((status === 403 || status === 429) && attempt < 3) {
       const delay = 250 * attempt;
       await new Promise(r => setTimeout(r, delay));

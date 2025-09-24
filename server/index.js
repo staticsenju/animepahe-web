@@ -7,7 +7,6 @@ import { upstream } from './upstream.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const PORT = process.env.PORT || 3001;
 
 const app = express();
@@ -16,14 +15,14 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*'
 }));
 app.use(express.json());
-
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 function sendUpstreamError(res, err, fallback) {
   if (err?.response) {
     return res.status(err.response.status).json({
       error: fallback,
-      upstreamStatus: err.response.status
+      upstreamStatus: err.response.status,
+      upstreamBody: err.response.data
     });
   }
   if (err?.code === 'ECONNABORTED') {
@@ -74,12 +73,6 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-/**
- * Aggregated episodes endpoint.
- * Prefer passing the session token from /api/search results.
- * Accepts numeric id for convenience, but will resolve it by performing a search.
- * GET /api/episodes?id=<sessionOrNumeric>[&refresh=1]
- */
 app.get('/api/episodes', async (req, res) => {
   let token = (req.query.id || req.query.session || '').trim();
   const refresh = req.query.refresh === '1';
@@ -139,16 +132,22 @@ app.get('/api/episodes', async (req, res) => {
     sendUpstreamError(res, err, 'Could not retrieve episodes');
   }
 });
-
 app.get('/api/stream', async (req, res) => {
   const episodeId = (req.query.episodeId || '').trim();
-  if (!episodeId) return res.status(400).json({ error: 'Missing episodeId' });
+  const epSession = (req.query.session || '').trim();
+
+  if (!episodeId || !epSession) {
+    return res.status(400).json({
+      error: 'Missing required parameters: episodeId AND session are both needed'
+    });
+  }
+
   try {
-    const params = new URLSearchParams({ m: 'links', id: episodeId });
+    const params = new URLSearchParams({ m: 'links', id: episodeId, session: epSession });
     const { data } = await upstream.get('?' + params.toString());
     res.json(data);
   } catch (e) {
-    sendUpstreamError(res, e, 'Failed to fetch stream link');
+    sendUpstreamError(res, e, 'Failed to fetch stream links');
   }
 });
 

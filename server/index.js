@@ -256,6 +256,7 @@ app.get('/api/hls', async (req, res) => {
   const targetEnc = req.query.u;
   const cookieRaw = req.query.c || '';
   const range = req.headers.range || '';
+  const debug = req.query.debug === '1';
 
   if (!targetEnc) {
     return res.status(400).json({ error: 'Missing u parameter' });
@@ -273,7 +274,10 @@ app.get('/api/hls', async (req, res) => {
   }
 
   const isManifest = /\.m3u8(\?|$)/i.test(target);
+  const urlObj = new URL(target);
   const base = target.split('/').slice(0, -1).join('/');
+  const origin = urlObj.origin;
+  const refererHeader = origin + '/';
 
   try {
     const upstream = await axios.get(target, {
@@ -282,8 +286,8 @@ app.get('/api/hls', async (req, res) => {
       headers: {
         'User-Agent': process.env.USER_AGENT ||
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Referer': 'https://kwik.si/',
-        'Origin': 'https://kwik.si',
+        'Referer': refererHeader,
+        'Origin': origin,
         'Accept': isManifest
           ? 'application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.8'
           : '*/*',
@@ -304,12 +308,37 @@ app.get('/api/hls', async (req, res) => {
 
     if (!isManifest) {
       const ct = upstream.headers['content-type'] || 'application/octet-stream';
+      // Heuristic: reject obviously wrong segment content types
+      if (/^image\//i.test(ct) || /text\/html/i.test(ct)) {
+        return res.status(502).json({
+          error: 'Unexpected content-type for media segment',
+            expected: ['video/mp2t', 'application/octet-stream', 'video/mp4'],
+            received: ct,
+            proxiedUrl: target
+          });
+      }
+      if (/\.jpe?g$/i.test(urlObj.pathname) || /\.png$/i.test(urlObj.pathname)) {
+        return res.status(502).json({
+          error: 'Suspicious segment extension (.jpg/.png) - likely anti-bot placeholder',
+          proxiedUrl: target,
+          contentType: ct
+        });
+      }
       res.setHeader('Content-Type', ct);
       if (upstream.status === 206) res.status(206);
       return res.send(upstream.data);
     }
 
-    const rewritten = rewriteManifest(upstream.data, base, cookieRaw);
+    const originalManifest = upstream.data;
+    if (debug) {
+      return res.json({
+        manifestSample: originalManifest.slice(0, 800),
+        lineCount: originalManifest.split(/\r?\n/).length,
+        base
+      });
+    }
+
+    const rewritten = rewriteManifest(originalManifest, base, cookieRaw);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     return res.send(rewritten);
   } catch (e) {
@@ -317,7 +346,8 @@ app.get('/api/hls', async (req, res) => {
     return res.status(status).json({
       error: 'Upstream fetch failed',
       status,
-      details: e.message
+      details: e.message,
+      proxiedUrl: target
     });
   }
 });

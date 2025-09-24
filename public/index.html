@@ -303,6 +303,7 @@ let lastMirrorData = null;
 let hlsInstance = null;
 let autoplay = false;
 let lastPlaylistUrl = '';
+let lastCookie = '';
 let appliedResolution = '';
 let appliedAudio = '';
 let subtitleTracks = [];
@@ -342,7 +343,7 @@ function setPlayerStatus(msg, kind='') {
   els.playerStatus.className = 'small ' + (kind==='error'?'error':kind==='warn'?'warn':'');
 }
 function debugLog(obj, label='') {
-  let prev = els.debug.textContent === '(empty)' ? '' : els.debug.textContent + '\\n\\n';
+  let prev = els.debug.textContent === '(empty)' ? '' : els.debug.textContent + '\n\n';
   const line = (label ? '[' + label + '] ' : '') + (typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2));
   els.debug.textContent = prev + line;
   els.debug.scrollTop = els.debug.scrollHeight;
@@ -362,6 +363,12 @@ function formatEpisodeLi(ep) {
     </div>
     <div class="small">${ep.duration || ''}</div>
   `;
+}
+
+/* ========== PLAYLIST PROXY HELPERS ========== */
+function buildProxiedPlaylist(originalUrl, cookieVal) {
+  return '/api/hls?u=' + encodeURIComponent(originalUrl) +
+    (cookieVal ? '&c=' + encodeURIComponent(cookieVal) : '');
 }
 
 /* ========== SEARCH ========== */
@@ -551,16 +558,19 @@ async function resolveAndPlayCurrentFilters(userInitiated) {
     debugLog(data, 'playlist-response');
     if (!res.ok || !data.playlist) throw new Error(data.error || 'No playlist returned');
     lastPlaylistUrl = data.playlist;
+    lastCookie = data.cookie || '';
     appliedResolution = resolution;
     appliedAudio = audio;
     els.reloadPlaylistBtn.disabled = false;
 
-    await playHls(data.playlist);
+    const proxiedUrl = buildProxiedPlaylist(data.playlist, lastCookie);
+    debugLog({ original: data.playlist, proxied: proxiedUrl }, 'playlist-proxy');
+    await playHls(proxiedUrl);
     setPlayerStatus(
       `Playing EP ${currentEpisode.episode} ${(appliedResolution || 'AUTO')} ${(appliedAudio || '')}`.trim()
     );
 
-    await fetchAndExtractSubtitles(data.playlist);
+    await fetchAndExtractSubtitles(proxiedUrl); // We fetch through proxy to bypass CORS for master too.
 
   } catch (e) {
     setPlayerStatus('Playlist error: ' + e.message, 'error');
@@ -580,7 +590,7 @@ async function playHls(url) {
     hlsInstance.loadSource(url);
     hlsInstance.attachMedia(els.video);
     hlsInstance.on(Hls.Events.ERROR, (evt,data)=>{
-      debugLog({evt,data}, 'hls-error');
+      debugLog({evt:'hlsError',data}, 'hls-error');
       if (data?.fatal) setPlayerStatus('Fatal HLS error', 'error');
     });
   } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -621,6 +631,8 @@ function parseSubtitlesFromM3U8(text, baseUrl) {
         if (!/^https?:/i.test(uri)) {
           uri = base + '/' + uri.replace(/^\.\//,'');
         }
+        // Route through proxy as well so subtitle playlists/segments also benefit
+        uri = buildProxiedPlaylist(uri, lastCookie);
         subtitleTracks.push({
           uri,
           lang: langMatch ? langMatch[1] : '',
@@ -687,9 +699,9 @@ async function applySubtitleTrack(index) {
     const text = await res.text();
     let finalVtt = '';
     if (/\.vtt($|\?)/i.test(track.uri) || text.startsWith('WEBVTT')) {
-      finalVtt = text.startsWith('WEBVTT') ? text : 'WEBVTT\\n\\n' + text;
+      finalVtt = text.startsWith('WEBVTT') ? text : 'WEBVTT\n\n' + text;
     } else if (/\.m3u8($|\?)/i.test(track.uri) || text.includes('#EXTM3U')) {
-      finalVtt = 'WEBVTT\\n\\n';
+      finalVtt = 'WEBVTT\n\n';
       const base = track.uri.split('/').slice(0,-1).join('/');
       const lines = text.split(/\r?\n/).filter(l => l && !l.startsWith('#'));
       for (const seg of lines) {
@@ -699,17 +711,17 @@ async function applySubtitleTrack(index) {
           const segResp = await fetch(segUrl);
           if (segResp.ok) {
             const segText = await segResp.text();
-            finalVtt += segText.replace(/^WEBVTT.*?\n+/i,'') + '\\n';
+            finalVtt += segText.replace(/^WEBVTT.*?\n+/i,'') + '\n';
           }
         } catch {}
       }
     } else {
       if (text.match(/\d+\s+\d{2}:\d{2}:\d{2}/)) {
-        finalVtt = 'WEBVTT\\n\\n' + text
+        finalVtt = 'WEBVTT\n\n' + text
           .replace(/,(\d{3})/g, '.$1')
           .replace(/^\d+\s*$/gm,'');
       } else {
-        finalVtt = 'WEBVTT\\n\\n' + text;
+        finalVtt = 'WEBVTT\n\n' + text;
       }
     }
     [...els.video.querySelectorAll('track')].forEach(t => t.remove());
@@ -736,7 +748,12 @@ els.searchBtn.addEventListener('click', doSearch);
 els.searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 els.applyBtn.addEventListener('click', () => resolveAndPlayCurrentFilters(true));
 els.refreshMirrorsBtn.addEventListener('click', () => { if (currentEpisode) loadEpisode(currentEpisode); });
-els.reloadPlaylistBtn.addEventListener('click', () => { if (lastPlaylistUrl) playHls(lastPlaylistUrl); });
+els.reloadPlaylistBtn.addEventListener('click', () => {
+  if (lastPlaylistUrl) {
+    const prox = buildProxiedPlaylist(lastPlaylistUrl, lastCookie);
+    playHls(prox);
+  }
+});
 els.clearDebugBtn.addEventListener('click', clearDebug);
 els.toggleAutoPlayBtn.addEventListener('click', ()=>{
   autoplay = !autoplay;

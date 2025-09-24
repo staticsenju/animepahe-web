@@ -120,6 +120,11 @@
     margin-right: 4px;
     letter-spacing: .5px;
   }
+  .row-actions {
+    display: flex;
+    gap: .5rem;
+    flex-wrap: wrap;
+  }
   @media (max-width: 1150px) {
     main { grid-template-columns: 1fr 1fr; }
     section:nth-child(3) { grid-column: span 2; }
@@ -143,7 +148,13 @@
     <ul id="results"></ul>
   </section>
   <section id="episodesSection">
-    <h2>Episodes</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
+      <h2 style="margin:0;">Episodes</h2>
+      <div class="row-actions">
+        <button id="refreshEpisodesBtn" style="display:none;">Refresh</button>
+      </div>
+    </div>
+    <div id="selectedAnime" class="small"></div>
     <div id="episodesInfo" class="small"></div>
     <ul id="episodes"></ul>
   </section>
@@ -154,7 +165,7 @@
   </section>
 </main>
 <script>
-const apiBase = ''; // same-origin calls
+const apiBase = ''; // same-origin
 
 const els = {
   searchInput: document.getElementById('searchInput'),
@@ -165,11 +176,14 @@ const els = {
   searchInfo: document.getElementById('searchInfo'),
   episodesInfo: document.getElementById('episodesInfo'),
   streamInfo: document.getElementById('streamInfo'),
-  streamLinks: document.getElementById('streamLinks')
+  streamLinks: document.getElementById('streamLinks'),
+  refreshEpisodesBtn: document.getElementById('refreshEpisodesBtn'),
+  selectedAnime: document.getElementById('selectedAnime')
 };
 
 let currentAnime = null;
 let currentEpisode = null;
+let lastEpisodesSession = null;
 
 function setStatus(msg, loading = false) {
   els.status.textContent = msg || '';
@@ -178,25 +192,33 @@ function setStatus(msg, loading = false) {
 
 async function fetchJSON(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  let body = null;
+  try { body = await r.json(); } catch {}
+  if (!r.ok) {
+    const reason = body?.error || r.statusText;
+    throw new Error(`${r.status} ${reason}`);
+  }
+  return body;
 }
 
-function clearResults() {
+function clearAll() {
   els.results.innerHTML = '';
   els.episodes.innerHTML = '';
   els.streamLinks.innerHTML = '';
   els.searchInfo.textContent = '';
   els.episodesInfo.textContent = '';
   els.streamInfo.textContent = '';
+  els.selectedAnime.textContent = '';
   currentAnime = null;
   currentEpisode = null;
+  lastEpisodesSession = null;
+  els.refreshEpisodesBtn.style.display = 'none';
 }
 
 async function doSearch() {
   const q = els.searchInput.value.trim();
   if (!q) return;
-  clearResults();
+  clearAll();
   setStatus('Searching...', true);
   els.searchBtn.disabled = true;
   try {
@@ -211,60 +233,110 @@ async function doSearch() {
   }
 }
 
+function extractSearchResults(data) {
+  // Upstream raw search returns { data: [...] }
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data?.results)) return data.results;
+  if (Array.isArray(data)) return data;
+  return [];
+}
+
 function renderSearch(data) {
-  const results = Array.isArray(data.data) ? data.data : (data.results || data || []);
+  const results = extractSearchResults(data);
   els.searchInfo.textContent = `${results.length} result(s)`;
   results.forEach(item => {
     const li = document.createElement('li');
+    const title = item.title || item.title_english || item.slug || 'Unknown Title';
     li.innerHTML = `
-      <strong>${item.title || item.title_english || item.slug || 'Unknown Title'}</strong>
-      <span class="small"><span class="badge">ID</span>${item.id || item.session || 'n/a'}</span>
+      <strong>${title}</strong>
+      <span class="small">
+        <span class="badge">ID</span>${item.id ?? 'n/a'}
+        <span class="badge">SESSION</span>${item.session || 'n/a'}
+      </span>
       ${item.type ? `<span class="small"><span class="badge">Type</span>${item.type}</span>` : ''}
-      ${item.year ? `<span class="small"><span class="badge">Year</span>${item.year}</span>` : ''}
+      ${item.episodes ? `<span class="small"><span class="badge">Episodes</span>${item.episodes}</span>` : ''}
     `;
     li.addEventListener('click', () => {
       document.querySelectorAll('#results li').forEach(n => n.classList.remove('active'));
       li.classList.add('active');
       currentAnime = item;
-      loadEpisodes(item.id || item.session);
+      currentEpisode = null;
+      els.streamLinks.innerHTML = '';
+      els.streamInfo.textContent = '';
+      loadEpisodes(item.session || item.id);
     });
     els.results.appendChild(li);
   });
 }
 
-async function loadEpisodes(animeId) {
+async function loadEpisodes(sessionOrId, { refresh = false } = {}) {
   els.episodes.innerHTML = '';
-  els.episodesInfo.textContent = 'Loading...';
+  els.episodesInfo.textContent = 'Loading episodes...';
+  els.refreshEpisodesBtn.style.display = 'inline-block';
+  els.refreshEpisodesBtn.disabled = true;
+  lastEpisodesSession = sessionOrId;
+
   try {
-    const data = await fetchJSON(`${apiBase}/api/episodes?id=${encodeURIComponent(session)}`);
-    const episodes = data.data?.episodes || data.data || data.episodes || [];
-    els.episodesInfo.textContent = `${episodes.length} episode(s)`;
-    episodes.forEach(ep => {
-      const li = document.createElement('li');
-      const epNum = ep.episode || ep.episode_number || ep.number || '?';
-      li.innerHTML = `
-        <strong>Episode ${epNum}</strong>
-        ${ep.created_at ? `<span class="small">${new Date(ep.created_at).toLocaleString()}</span>` : ''}
-      `;
-      li.addEventListener('click', () => {
-        document.querySelectorAll('#episodes li').forEach(n => n.classList.remove('active'));
-        li.classList.add('active');
-        currentEpisode = ep;
-        loadStream(ep.id || ep.session || ep.episode_id);
-      });
-      els.episodes.appendChild(li);
-    });
+    const url = `${apiBase}/api/episodes?id=${encodeURIComponent(sessionOrId)}${refresh ? '&refresh=1' : ''}`;
+    const data = await fetchJSON(url);
+    renderEpisodes(data);
   } catch (e) {
     els.episodesInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
+  } finally {
+    els.refreshEpisodesBtn.disabled = false;
   }
 }
 
-async function loadStream(episodeId) {
+function renderEpisodes(data) {
+  // New aggregated response: { session, total, last_page, episodes: [], cached }
+  const episodes = Array.isArray(data?.episodes)
+    ? data.episodes
+    : (data?.data?.episodes || data?.data || []);
+  const total = data.total ?? episodes.length;
+  const lastPage = data.last_page ?? '?';
+  const cached = data.cached ? ' (cached)' : '';
+  els.episodesInfo.textContent = `${total} episode(s) across ${lastPage} page(s)${cached}`;
+  els.selectedAnime.innerHTML = currentAnime
+    ? `<strong>${currentAnime.title || currentAnime.title_english || 'Selected Anime'}</strong><br>
+       <span class="small">
+         Using session: <code>${data.session || currentAnime.session || 'n/a'}</code>
+         ${currentAnime.id ? ` | Numeric id: <code>${currentAnime.id}</code>` : ''}
+       </span>`
+    : `<span class="small">Session: ${data.session}</span>`;
+
+  episodes.forEach(ep => {
+    const li = document.createElement('li');
+    const epNum = ep.episode ?? ep.episode_number ?? ep.number ?? '?';
+    const epSession = ep.session || '';
+    const created = ep.created_at ? `<span class="small">${new Date(ep.created_at).toLocaleString()}</span>` : '';
+    li.innerHTML = `
+      <strong>Episode ${epNum}</strong>
+      ${created}
+      <span class="small"><span class="badge">EP_SESSION</span>${epSession || 'n/a'}</span>
+    `;
+    li.addEventListener('click', () => {
+      document.querySelectorAll('#episodes li').forEach(n => n.classList.remove('active'));
+      li.classList.add('active');
+      currentEpisode = ep;
+      loadStream(ep.session || ep.id || ep.episode_id || epNum);
+    });
+    els.episodes.appendChild(li);
+  });
+
+  if (!episodes.length) {
+    els.episodesInfo.innerHTML += `<div class="error">No episodes returned.</div>`;
+  }
+}
+
+async function loadStream(episodeToken) {
   els.streamLinks.innerHTML = '';
   els.streamInfo.textContent = 'Loading stream links...';
   try {
-    const data = await fetchJSON(`${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}`);
-    const links = data.data?.links || data.links || data || [];
+    const data = await fetchJSON(`${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeToken)}`);
+    // Upstream direct links response may not be uniform; attempt common shapes
+    const links = Array.isArray(data?.data?.links) ? data.data.links :
+                  Array.isArray(data?.links) ? data.links :
+                  (Array.isArray(data) ? data : []);
     if (!Array.isArray(links)) {
       els.streamInfo.textContent = 'No link array returned';
       els.streamLinks.textContent = JSON.stringify(data, null, 2);
@@ -276,7 +348,9 @@ async function loadStream(episodeId) {
       a.href = l.url || l.link || l.playlist || '#';
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = `${l.resolution || l.quality || 'Link'} - ${a.href}`;
+      const labelRes = l.resolution || l.quality || '';
+      const labelHost = l.server || l.cdn || l.host || '';
+      a.textContent = `${labelRes}${labelRes && labelHost ? ' - ' : ''}${labelHost} ${a.href}`;
       els.streamLinks.appendChild(a);
       els.streamLinks.appendChild(document.createElement('br'));
     });
@@ -285,9 +359,15 @@ async function loadStream(episodeId) {
   }
 }
 
+// Event bindings
 els.searchBtn.addEventListener('click', doSearch);
 els.searchInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
+});
+els.refreshEpisodesBtn.addEventListener('click', () => {
+  if (lastEpisodesSession) {
+    loadEpisodes(lastEpisodesSession, { refresh: true });
+  }
 });
 </script>
 </body>

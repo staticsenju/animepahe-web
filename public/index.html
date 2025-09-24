@@ -328,17 +328,17 @@ function renderEpisodes(data) {
   }
 }
 
-async function loadStream(episodeToken) {
+async function loadStream(episodeId, episodeSession) {
   els.streamLinks.innerHTML = '';
   els.streamInfo.textContent = 'Loading stream links...';
   try {
-    const data = await fetchJSON(`${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeToken)}`);
-    // Upstream direct links response may not be uniform; attempt common shapes
-    const links = Array.isArray(data?.data?.links) ? data.data.links :
-                  Array.isArray(data?.links) ? data.links :
-                  (Array.isArray(data) ? data : []);
+    const url = `${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}&session=${encodeURIComponent(episodeSession)}`;
+    const data = await fetchJSON(url);
+    const links = Array.isArray(data?.data?.links) ? data.data.links
+                : Array.isArray(data?.links) ? data.links
+                : (Array.isArray(data) ? data : []);
     if (!Array.isArray(links)) {
-      els.streamInfo.textContent = 'No link array returned';
+      els.streamInfo.textContent = 'Unexpected response';
       els.streamLinks.textContent = JSON.stringify(data, null, 2);
       return;
     }
@@ -358,6 +358,7 @@ async function loadStream(episodeToken) {
     els.streamInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
   }
 }
+
 
 // Event bindings
 els.searchBtn.addEventListener('click', doSearch);

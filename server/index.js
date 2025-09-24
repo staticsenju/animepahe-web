@@ -3,6 +3,8 @@ import axios from 'axios';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const PORT = process.env.PORT || 3001;
 const API_BASE = process.env.ANIME_API_BASE || 'https://animepahe.si/api';
@@ -14,6 +16,11 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*'
 }));
 app.use(express.json());
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const upstream = axios.create({
   baseURL: API_BASE,

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Anime Search</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #111;
+    --fg: #eee;
+    --accent: #6c5ce7;
+    --error: #e74c3c;
+    --card: #1e1e1e;
+  }
+  body {
+    margin: 0;
+    font-family: system-ui, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header {
+    padding: 1rem;
+    background: #181818;
+    display: flex;
+    gap: .75rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  input[type="text"] {
+    flex: 1 1 260px;
+    padding: .6rem .75rem;
+    border: 1px solid #333;
+    background: #222;
+    color: var(--fg);
+    border-radius: 6px;
+    font-size: 1rem;
+  }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: .65rem 1rem;
+    font-size: 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 320px 1fr 400px;
+    gap: 1rem;
+    padding: 1rem;
+  }
+  section {
+    background: var(--card);
+    border-radius: 10px;
+    padding: .75rem .9rem;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+  h2 {
+    margin: .2rem 0 .4rem;
+    font-size: 1.05rem;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    opacity: .75;
+  }
+  ul {
+    list-style: none;
+    padding: 0; margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+  li {
+    background: #242424;
+    border: 1px solid #2f2f2f;
+    border-radius: 8px;
+    padding: .55rem .7rem;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    transition: background .15s;
+  }
+  li:hover { background: #2c2c2c; }
+  .active { outline: 2px solid var(--accent); }
+  .small {
+    font-size: .75rem;
+    opacity: .8;
+  }
+  .error {
+    color: var(--error);
+    font-size: .85rem;
+    margin-top: .25rem;
+  }
+  .loading {
+    opacity: .6;
+    font-style: italic;
+  }
+  .stream-links a {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+    font-size: .8rem;
+  }
+  .badge {
+    display: inline-block;
+    background: #333;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: .65rem;
+    margin-right: 4px;
+    letter-spacing: .5px;
+  }
+  @media (max-width: 1150px) {
+    main { grid-template-columns: 1fr 1fr; }
+    section:nth-child(3) { grid-column: span 2; }
+  }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+    section:nth-child(2), section:nth-child(3) { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <input id="searchInput" type="text" placeholder="Search anime..." />
+  <button id="searchBtn">Search</button>
+  <span id="status" class="small"></span>
+</header>
+<main>
+  <section id="searchSection">
+    <h2>Results</h2>
+    <div id="searchInfo" class="small"></div>
+    <ul id="results"></ul>
+  </section>
+  <section id="episodesSection">
+    <h2>Episodes</h2>
+    <div id="episodesInfo" class="small"></div>
+    <ul id="episodes"></ul>
+  </section>
+  <section id="streamSection">
+    <h2>Stream Links</h2>
+    <div id="streamInfo" class="small"></div>
+    <div class="stream-links" id="streamLinks"></div>
+  </section>
+</main>
+<script>
+const apiBase = ''; // same-origin calls
+
+const els = {
+  searchInput: document.getElementById('searchInput'),
+  searchBtn: document.getElementById('searchBtn'),
+  status: document.getElementById('status'),
+  results: document.getElementById('results'),
+  episodes: document.getElementById('episodes'),
+  searchInfo: document.getElementById('searchInfo'),
+  episodesInfo: document.getElementById('episodesInfo'),
+  streamInfo: document.getElementById('streamInfo'),
+  streamLinks: document.getElementById('streamLinks')
+};
+
+let currentAnime = null;
+let currentEpisode = null;
+
+function setStatus(msg, loading = false) {
+  els.status.textContent = msg || '';
+  els.status.className = loading ? 'small loading' : 'small';
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function clearResults() {
+  els.results.innerHTML = '';
+  els.episodes.innerHTML = '';
+  els.streamLinks.innerHTML = '';
+  els.searchInfo.textContent = '';
+  els.episodesInfo.textContent = '';
+  els.streamInfo.textContent = '';
+  currentAnime = null;
+  currentEpisode = null;
+}
+
+async function doSearch() {
+  const q = els.searchInput.value.trim();
+  if (!q) return;
+  clearResults();
+  setStatus('Searching...', true);
+  els.searchBtn.disabled = true;
+  try {
+    const data = await fetchJSON(`${apiBase}/api/search?q=${encodeURIComponent(q)}`);
+    renderSearch(data);
+    setStatus('Search complete');
+  } catch (e) {
+    setStatus('Search failed');
+    els.searchInfo.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+  } finally {
+    els.searchBtn.disabled = false;
+  }
+}
+
+function renderSearch(data) {
+  const results = Array.isArray(data.data) ? data.data : (data.results || data || []);
+  els.searchInfo.textContent = `${results.length} result(s)`;
+  results.forEach(item => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <strong>${item.title || item.title_english || item.slug || 'Unknown Title'}</strong>
+      <span class="small"><span class="badge">ID</span>${item.id || item.session || 'n/a'}</span>
+      ${item.type ? `<span class="small"><span class="badge">Type</span>${item.type}</span>` : ''}
+      ${item.year ? `<span class="small"><span class="badge">Year</span>${item.year}</span>` : ''}
+    `;
+    li.addEventListener('click', () => {
+      document.querySelectorAll('#results li').forEach(n => n.classList.remove('active'));
+      li.classList.add('active');
+      currentAnime = item;
+      loadEpisodes(item.id || item.session);
+    });
+    els.results.appendChild(li);
+  });
+}
+
+async function loadEpisodes(animeId) {
+  els.episodes.innerHTML = '';
+  els.episodesInfo.textContent = 'Loading...';
+  try {
+    const data = await fetchJSON(`${apiBase}/api/episodes?id=${encodeURIComponent(animeId)}`);
+    const episodes = data.data?.episodes || data.data || data.episodes || [];
+    els.episodesInfo.textContent = `${episodes.length} episode(s)`;
+    episodes.forEach(ep => {
+      const li = document.createElement('li');
+      const epNum = ep.episode || ep.episode_number || ep.number || '?';
+      li.innerHTML = `
+        <strong>Episode ${epNum}</strong>
+        ${ep.created_at ? `<span class="small">${new Date(ep.created_at).toLocaleString()}</span>` : ''}
+      `;
+      li.addEventListener('click', () => {
+        document.querySelectorAll('#episodes li').forEach(n => n.classList.remove('active'));
+        li.classList.add('active');
+        currentEpisode = ep;
+        loadStream(ep.id || ep.session || ep.episode_id);
+      });
+      els.episodes.appendChild(li);
+    });
+  } catch (e) {
+    els.episodesInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
+  }
+}
+
+async function loadStream(episodeId) {
+  els.streamLinks.innerHTML = '';
+  els.streamInfo.textContent = 'Loading stream links...';
+  try {
+    const data = await fetchJSON(`${apiBase}/api/stream?episodeId=${encodeURIComponent(episodeId)}`);
+    const links = data.data?.links || data.links || data || [];
+    if (!Array.isArray(links)) {
+      els.streamInfo.textContent = 'No link array returned';
+      els.streamLinks.textContent = JSON.stringify(data, null, 2);
+      return;
+    }
+    els.streamInfo.textContent = `${links.length} link(s)`;
+    links.forEach(l => {
+      const a = document.createElement('a');
+      a.href = l.url || l.link || l.playlist || '#';
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `${l.resolution || l.quality || 'Link'} - ${a.href}`;
+      els.streamLinks.appendChild(a);
+      els.streamLinks.appendChild(document.createElement('br'));
+    });
+  } catch (e) {
+    els.streamInfo.innerHTML = `<span class="error">Failed: ${e.message}</span>`;
+  }
+}
+
+els.searchBtn.addEventListener('click', doSearch);
+els.searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>
